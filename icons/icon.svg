@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#000"/>
+  <g font-family="'Segoe UI Black','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-weight="900" font-size="168" text-anchor="middle" letter-spacing="-4">
+    <text x="256" y="236" fill="#fff">Farm</text>
+    <text x="256" y="390" fill="#ff7a00">Calc</text>
+  </g>
+</svg>
