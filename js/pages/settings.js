@@ -88,7 +88,7 @@ export function renderSettings(view) {
           })()))),
     h('div.set-group', h('h2', 'Units'),
       h('div.panel',
-        row('Unit system', 'Default units for new inputs and results', seg('system', [['us', 'US'], ['metric', 'Metric']])),
+        row('Unit system', 'Sask: acres, bushels, lb/ac, ft & in, seeds/ft², with kg/tonnes, km/h, litres and L/ac', seg('system', [['sk', 'Sask'], ['us', 'US'], ['metric', 'Metric']])),
         row('Default crop', null, select('crop', Object.entries(CROPS).map(([k, c]) => [k, c.label]), 'Default crop')),
         row('Decimal places', 'Auto rounds big numbers more', select('decimals', [['auto', 'Auto'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']], 'Decimal places')),
         row('Currency symbol', null, h('input.text-input', { type: 'text', value: settings.currency, maxlength: 3, on: { input: e => saveSettings({ currency: e.target.value || '$' }) } })),

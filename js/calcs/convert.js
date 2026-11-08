@@ -1,5 +1,5 @@
 import { n, step, fail } from './_h.js';
-import { DIMS, PREF, convert, toBase, unitLabel } from '../units.js';
+import { DIMS, PREF, convert, toBase, unitLabel, defaultUnit } from '../units.js';
 
 const GENERAL = Object.keys(DIMS).filter(d => !DIMS[d].crop);
 const unitOpts = (dim, cur) => Object.keys(DIMS[dim].units).map(value => ({ value, label: unitLabel(dim, value, cur) }));
@@ -25,8 +25,8 @@ export default [
     fields: [
       { name: 'dim', label: 'Type', type: 'select', def: 'mass', options: GENERAL.map(value => ({ value, label: DIMS[value].label })) },
       { name: 'value', label: 'Value', sym: 'x', unit: '', def: 1 },
-      { name: 'from', label: 'From', type: 'select', def: 'lb', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => PREF[v.dim]?.[s] || DIMS[v.dim].base },
-      { name: 'to', label: 'To', type: 'select', def: 'kg', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => PREF[v.dim]?.[s === 'us' ? 'metric' : 'us'] || Object.keys(DIMS[v.dim].units)[1] },
+      { name: 'from', label: 'From', type: 'select', def: 'lb', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => defaultUnit(v.dim, s) },
+      { name: 'to', label: 'To', type: 'select', def: 'kg', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => { const a = defaultUnit(v.dim, s), m = defaultUnit(v.dim, 'metric'); return a === m ? defaultUnit(v.dim, 'us') : m; } },
     ],
     compute(v, ctx) {
       const { dim, from, to, value } = v;

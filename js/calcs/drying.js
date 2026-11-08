@@ -1,6 +1,8 @@
 import { n, m, step, pctStr, fail } from './_h.js';
 
 const crop = { name: 'crop', label: 'Crop', type: 'crop' };
+const FUEL_UNITS = [{ value: 'L', label: 'L' }, { value: 'gal', label: 'gal' }];
+const FUEL_PRICE = [{ value: 'L', label: '/L' }, { value: 'gal', label: '/gal' }];
 
 export default [
   {
@@ -63,8 +65,8 @@ export default [
       { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 18, cropDefault: 'harvest' },
       { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 15.5, cropDefault: 'moist' },
       { name: 'method', label: 'Cost method', type: 'select', def: 'fuel', options: [{ value: 'fuel', label: 'Dryer fuel use' }, { value: 'rate', label: 'Custom charge' }] },
-      { name: 'use', label: 'Fuel per bu per point', sym: 'F', unit: 'gal', def: 0.02, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.02 gal/bu/pt' },
-      { name: 'price', label: 'Fuel price', sym: 'P', money: true, unit: '/gal', def: 1.5, show: v => v.method === 'fuel' },
+      { name: 'use', label: 'Fuel per bu per point', sym: 'F', choices: FUEL_UNITS, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 0.02, defs: { gal: 0.02, L: 0.076 }, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.076 L (0.02 gal) per bu per point' },
+      { name: 'price', label: 'Fuel price', sym: 'P', money: true, choices: FUEL_PRICE, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 1.5, defs: { gal: 1.5, L: 0.6 }, show: v => v.method === 'fuel', help: 'Propane price (rough placeholder; type yours)' },
       { name: 'other', label: 'Electric & other per bu', sym: 'E', money: true, unit: '/bu', def: 0.01, optional: true, show: v => v.method === 'fuel' },
       { name: 'rate', label: 'Charge per point per bu', sym: 'C', money: true, unit: '/pt', def: 0.04, show: v => v.method === 'rate' },
     ],
@@ -81,18 +83,22 @@ export default [
           step('Drying charge', 'B × pts × C', `${n(bu)} × ${n(pts)} × ${m(v.rate, ctx, 3)}`, m(total, ctx), true),
         ];
       } else {
+        // fuel in its own unit (L or gal); price converted to that same unit
+        const fu = v.useUnit === 'L' ? 'L' : 'gal';
+        const L_PER_GAL = 3.785411784;
+        const pricePer = v.priceUnit === fu ? v.price : (fu === 'L' ? v.price / L_PER_GAL : v.price * L_PER_GAL);
         const fuel = bu * pts * v.use;
-        const fuelCost = fuel * v.price;
+        const fuelCost = fuel * pricePer;
         const other = bu * (v.other || 0);
         total = fuelCost + other;
         work = [
           step('Points removed', 'Mi − Mf', `${n(v.mi)} − ${n(v.mf)}`, `${n(pts)} pts`),
-          step('Fuel used', 'B × pts × F', `${n(bu)} × ${n(pts)} × ${n(v.use, 4)}`, `${n(fuel)} gal`),
-          step('Fuel cost', 'fuel × P', `${n(fuel)} × ${m(v.price, ctx)}`, m(fuelCost, ctx)),
+          step('Fuel used', 'B × pts × F', `${n(bu)} × ${n(pts)} × ${n(v.use, 4)}`, `${n(fuel)} ${fu}`),
+          step('Fuel cost', 'fuel × P', `${n(fuel)} × ${m(pricePer, ctx, 3)}/${fu}`, m(fuelCost, ctx)),
         ];
         if (other > 0) work.push(step('Electric & other', 'B × E', `${n(bu)} × ${m(v.other, ctx, 3)}`, m(other, ctx)));
         work.push(step('Total cost', other > 0 ? 'fuel cost + other' : 'fuel cost', other > 0 ? `${m(fuelCost, ctx)} + ${m(other, ctx)}` : m(fuelCost, ctx), m(total, ctx), true));
-        results.push({ label: 'Fuel used', value: fuel, unit: 'gal' });
+        results.push({ label: 'Fuel used', value: fuel, unit: fu });
       }
       return {
         results: [

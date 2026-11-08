@@ -405,6 +405,7 @@ const DIMS = {
     units: {
       flozac: { label: 'fl oz/ac', f: 1 / 128 }, ptac: { label: 'pt/ac', f: 1 / 8 }, qtac: { label: 'qt/ac', f: 1 / 4 },
       galac: { label: 'gal/ac', f: 1 },
+      mLac: { label: 'mL/ac', f: GAL_PER_L / 1000 }, Lac: { label: 'L/ac', f: GAL_PER_L },   // Canadian labels: per acre, metric volume
       mLha: { label: 'mL/ha', f: GAL_PER_L / 1000 / AC_PER_HA }, Lha: { label: 'L/ha', f: GAL_PER_L / AC_PER_HA },
     },
   },
@@ -468,8 +469,8 @@ const PRACTICAL = {
   temperature: ['F', 'C'],
   flow: ['gpm', 'lpm'],
   massRate: ['lbac', 'kgha'],
-  volRate: ['galac', 'Lha'],
-  countRate: ['pac', 'pha'],
+  volRate: ['galac', 'Lac', 'Lha'],
+  countRate: ['pac', 'pft2', 'pha', 'pm2'],
   moneyArea: ['dac', 'dha'],
   areaRate: ['ach', 'hah'],
   grain: ['bu', 'lb', 'ton', 't'],
@@ -484,7 +485,30 @@ function practicalUnits(dim, unitSet, current) {
   return list;
 }
 
+// Saskatchewan / prairie units: imperial where that's how it's done here (acres,
+// bushels, lb/ac, feet & inches, seeds per ft², $/bu) and metric where that's
+// how it's done here (kg scale tickets & tonnes, km/h, litres, L/ac on labels, °C).
+// Each quantity follows the US side, the metric side, or names its own unit.
+const SK = {
+  length: 'us', area: 'us', volume: 'metric', mass: 'metric', speed: 'metric', pressure: 'us',
+  temperature: 'metric', flow: 'us', massRate: 'us', volRate: 'Lac', countRate: 'us', moneyArea: 'us',
+  areaRate: 'us', grain: 'us', grainYield: 'us', grainPrice: 'us',
+};
+
+/** For field defaults: does this quantity follow the US or the metric side in this system? */
+function sideFor(dim, system) {
+  if (system !== 'sk') return system;
+  const s = SK[dim] || 'us';
+  return s === 'metric' ? 'metric' : 'us';
+}
+
 function defaultUnit(dim, system, override) {
+  if (system === 'sk') {
+    if (override && override.sk) return override.sk;
+    const s = SK[dim] || 'us';
+    if (s !== 'us' && s !== 'metric') return s;          // a named unit, e.g. L/ac
+    return defaultUnit(dim, s, override);
+  }
   if (override && override[system]) return override[system];
   return (PREF[dim] && PREF[dim][system]) || DIMS[dim].base;
 }
@@ -557,12 +581,12 @@ const UNIT_NAMES = {
   tha: 'tonnes / hectare', qha: 'quintals / hectare', dbu: 'per bushel', dcwt: 'per cwt', dton: 'per short ton', dt: 'per tonne',
   ac: 'acres', ha: 'hectares', ft2: 'square feet', m2: 'square metres', gal: 'US gallons', L: 'litres', ft3: 'cubic feet', m3: 'cubic metres',
   ft: 'feet', m: 'metres', in: 'inches', cm: 'centimetres', yd: 'yards', mi: 'miles', km: 'kilometres', ring: 'bin rings',
-  galac: 'gallons / acre', Lha: 'litres / hectare', mph: 'miles / hour', kmh: 'km / hour', pac: 'per acre', pha: 'per hectare',
+  galac: 'gallons / acre', Lac: 'litres / acre', mLac: 'mL / acre', Lha: 'litres / hectare', mph: 'miles / hour', kmh: 'km / hour', pac: 'per acre', pha: 'per hectare',
   ach: 'acres / hour', hah: 'hectares / hour', dac: 'per acre', dha: 'per hectare', psi: 'psi', kPa: 'kilopascals', F: 'Fahrenheit', C: 'Celsius',
 };
 
 const CONST = { LB_PER_KG, LB_PER_T, AC_PER_HA, GAL_PER_L, FT_PER_M, FT3_PER_BU, BU_PER_FT3: 1 / FT3_PER_BU };
-Object.assign(__exp, { DIMS, PREF, PRACTICAL, practicalUnits, defaultUnit, toBase, fromBase, convert, unitLabel, unitList, findUnitByLabel, needsTestWeight, UNIT_NAMES, CONST });
+Object.assign(__exp, { DIMS, PREF, PRACTICAL, practicalUnits, SK, sideFor, defaultUnit, toBase, fromBase, convert, unitLabel, unitList, findUnitByLabel, needsTestWeight, UNIT_NAMES, CONST });
 return __exp;
 })();
 
@@ -607,6 +631,8 @@ const __exp = {};
 const { n, m, step, pctStr, fail } = __mods['js/calcs/_h.js'];
 
 const crop = { name: 'crop', label: 'Crop', type: 'crop' };
+const FUEL_UNITS = [{ value: 'L', label: 'L' }, { value: 'gal', label: 'gal' }];
+const FUEL_PRICE = [{ value: 'L', label: '/L' }, { value: 'gal', label: '/gal' }];
 
 __exp.default = [
   {
@@ -669,8 +695,8 @@ __exp.default = [
       { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 18, cropDefault: 'harvest' },
       { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 15.5, cropDefault: 'moist' },
       { name: 'method', label: 'Cost method', type: 'select', def: 'fuel', options: [{ value: 'fuel', label: 'Dryer fuel use' }, { value: 'rate', label: 'Custom charge' }] },
-      { name: 'use', label: 'Fuel per bu per point', sym: 'F', unit: 'gal', def: 0.02, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.02 gal/bu/pt' },
-      { name: 'price', label: 'Fuel price', sym: 'P', money: true, unit: '/gal', def: 1.5, show: v => v.method === 'fuel' },
+      { name: 'use', label: 'Fuel per bu per point', sym: 'F', choices: FUEL_UNITS, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 0.02, defs: { gal: 0.02, L: 0.076 }, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.076 L (0.02 gal) per bu per point' },
+      { name: 'price', label: 'Fuel price', sym: 'P', money: true, choices: FUEL_PRICE, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 1.5, defs: { gal: 1.5, L: 0.6 }, show: v => v.method === 'fuel', help: 'Propane price (rough placeholder; type yours)' },
       { name: 'other', label: 'Electric & other per bu', sym: 'E', money: true, unit: '/bu', def: 0.01, optional: true, show: v => v.method === 'fuel' },
       { name: 'rate', label: 'Charge per point per bu', sym: 'C', money: true, unit: '/pt', def: 0.04, show: v => v.method === 'rate' },
     ],
@@ -687,18 +713,22 @@ __exp.default = [
           step('Drying charge', 'B × pts × C', `${n(bu)} × ${n(pts)} × ${m(v.rate, ctx, 3)}`, m(total, ctx), true),
         ];
       } else {
+        // fuel in its own unit (L or gal); price converted to that same unit
+        const fu = v.useUnit === 'L' ? 'L' : 'gal';
+        const L_PER_GAL = 3.785411784;
+        const pricePer = v.priceUnit === fu ? v.price : (fu === 'L' ? v.price / L_PER_GAL : v.price * L_PER_GAL);
         const fuel = bu * pts * v.use;
-        const fuelCost = fuel * v.price;
+        const fuelCost = fuel * pricePer;
         const other = bu * (v.other || 0);
         total = fuelCost + other;
         work = [
           step('Points removed', 'Mi − Mf', `${n(v.mi)} − ${n(v.mf)}`, `${n(pts)} pts`),
-          step('Fuel used', 'B × pts × F', `${n(bu)} × ${n(pts)} × ${n(v.use, 4)}`, `${n(fuel)} gal`),
-          step('Fuel cost', 'fuel × P', `${n(fuel)} × ${m(v.price, ctx)}`, m(fuelCost, ctx)),
+          step('Fuel used', 'B × pts × F', `${n(bu)} × ${n(pts)} × ${n(v.use, 4)}`, `${n(fuel)} ${fu}`),
+          step('Fuel cost', 'fuel × P', `${n(fuel)} × ${m(pricePer, ctx, 3)}/${fu}`, m(fuelCost, ctx)),
         ];
         if (other > 0) work.push(step('Electric & other', 'B × E', `${n(bu)} × ${m(v.other, ctx, 3)}`, m(other, ctx)));
         work.push(step('Total cost', other > 0 ? 'fuel cost + other' : 'fuel cost', other > 0 ? `${m(fuelCost, ctx)} + ${m(other, ctx)}` : m(fuelCost, ctx), m(total, ctx), true));
-        results.push({ label: 'Fuel used', value: fuel, unit: 'gal' });
+        results.push({ label: 'Fuel used', value: fuel, unit: fu });
       }
       return {
         results: [
@@ -773,6 +803,15 @@ const { n, step, deg, fail, CONST } = __mods['js/calcs/_h.js'];
 
 const crop = { name: 'crop', label: 'Crop', type: 'crop' };
 const BU_PER_FT3 = CONST.BU_PER_FT3;   // 0.8036
+
+// How manufacturers rate bin capacity (from their spec sheets):
+//   Westeel: grain peaked at 30°, 5% compaction in the cylinder, 1.244 ft³/bu
+//   Sukup:   grain peaked at 28°, 6% compaction (ASABE S413.1)
+// Check: Westeel 2406 Wide-Corr (24 ft, 6 × 44" rings) is listed at 9,220 bu; this gives 9,240.
+const RATING = {
+  westeel: { angle: 30, pack: 5, name: 'Westeel rating' },
+  sukup: { angle: 28, pack: 6, name: 'Sukup rating' },
+};
 const GAL_PER_FT3 = 7.48051948;
 
 __exp.default = [
@@ -793,28 +832,42 @@ __exp.default = [
       {
         name: 'ringH', label: 'Ring height', type: 'select', def: '44', show: (v, u) => u.h === 'ring', options: [
           { value: '44', label: '44″ (Westeel Wide-Corr, Sukup, most current bins)', short: '44″' },
-          { value: '32', label: '32″ (older bins)', short: '32″' },
-          { value: '30', label: '30″ (older Westeel)', short: '30″' },
+          { value: '32', label: '32″ (older narrow-corrugation bins, e.g. older GSI)', short: '32″' },
+          { value: '30', label: '30″ (older Westeel, e.g. Westeel-Rosco 1406)', short: '30″' },
           { value: 'custom', label: 'Custom…' },
         ],
       },
       { name: 'ringCustom', label: 'Custom ring height', sym: 'Rh', unit: 'in', def: 39, show: (v, u) => u.h === 'ring' && v.ringH === 'custom' },
+      // Rated capacity (like the manufacturer's spec sheet) or the grain as it actually sits.
+      // Entries made before this option existed reopen "as measured" so their numbers don't change.
       {
-        name: 'top', label: 'Top of grain', type: 'select', def: 'level', options: [
+        name: 'basis', label: 'Capacity basis', type: 'select', def: 'westeel', legacy: 'measured', options: [
+          { value: 'westeel', label: 'Westeel rating (peaked 30°, 5% packed)', short: 'Westeel rating' },
+          { value: 'sukup', label: 'Sukup rating (peaked 28°, 6% packed)', short: 'Sukup rating' },
+          { value: 'measured', label: 'As measured (your own top & packing)', short: 'As measured' },
+        ],
+      },
+      {
+        name: 'top', label: 'Top of grain', type: 'select', def: 'level', show: v => v.basis === 'measured', options: [
           { value: 'level', label: 'Leveled' }, { value: 'peak', label: 'Peaked' }, { value: 'funnel', label: 'Inverted cone' },
         ],
       },
       {
-        name: 'repose', label: 'Angle of repose', sym: 'θ', unit: '°', def: 23, cropDefault: 'repose', show: v => v.top !== 'level',
+        name: 'repose', label: 'Angle of repose', sym: 'θ', unit: '°', def: 23, cropDefault: 'repose', show: v => v.basis === 'measured' && v.top !== 'level',
         help: v => (v.top === 'funnel' ? 'Slope of the funnel left after unloading from the center' : 'Slope of the peak when filled from the center'),
       },
       { name: 'bottom', label: 'Bottom', type: 'select', def: 'flat', options: [{ value: 'flat', label: 'Flat floor' }, { value: 'hopper', label: 'Hopper cone' }] },
       { name: 'hopper', label: 'Hopper slope', sym: 'α', unit: '°', def: 45, show: v => v.bottom === 'hopper' },
-      { name: 'pack', label: 'Packing', sym: 'k', unit: '%', def: 0, optional: true, help: 'Grain settles ~3–8% in a full bin; 0 = loose fill' },
+      { name: 'pack', label: 'Packing', sym: 'k', unit: '%', def: 0, optional: true, show: v => v.basis === 'measured', help: 'Grain settles ~3–8% in a full bin (applied to the walls); 0 = loose fill' },
     ],
     compute(v, ctx) {
       const D = v.dia, H = v.h, r = D / 2;
       if (D <= 0) return fail('Enter a bin diameter.');
+      // a manufacturer rating fixes the peak angle and packing; "as measured" uses yours
+      const R = RATING[v.basis];
+      const top = R ? 'peak' : v.top;
+      const theta = R ? R.angle : v.repose;
+      const packPct = R ? R.pack : (v.pack || 0);
       const base = Math.PI * r * r;
       const cyl = base * H;
       let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
@@ -827,14 +880,14 @@ __exp.default = [
         step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
         step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
       );
-      if (v.top === 'peak') {
-        peakH = r * Math.tan(deg(v.repose));
+      if (top === 'peak') {
+        peakH = r * Math.tan(deg(theta));
         peak = base * peakH / 3;
-        work.push(step('Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
+        work.push(step(R ? `Peak cone (${n(theta)}°)` : 'Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
       }
-      if (v.top === 'funnel') {
+      if (top === 'funnel') {
         // grain pulled from the center leaves an upside-down cone: subtract it
-        funH = r * Math.tan(deg(v.repose));
+        funH = r * Math.tan(deg(theta));
         if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
         funnel = base * funH / 3;
         work.push(step('Funnel (inverted cone)', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(funH)} ÷ 3`, `${n(funnel)} ft³`));
@@ -844,30 +897,34 @@ __exp.default = [
         hop = base * hopH / 3;
         work.push(step('Hopper cone', 'area × (r × tan α) ÷ 3', `${n(base)} × ${n(hopH)} ÷ 3`, `${n(hop)} ft³`));
       }
-      const ft3 = cyl + peak + hop - funnel;
-      const packF = 1 + (v.pack || 0) / 100;
-      const bu = ft3 * BU_PER_FT3 * packF;
+      const ft3 = cyl + peak + hop - funnel;          // physical volume
+      // packing (compaction) settles the grain in the walls; manufacturers apply it to the cylinder only
+      const packF = 1 + packPct / 100;
+      const cylP = cyl * packF;
+      if (packF > 1) work.push(step(R ? `Packed walls (${n(packPct)}%)` : 'Packed walls', 'cyl × (1 + k)', `${n(cyl)} × ${n(packF, 3)}`, `${n(cylP)} ft³`));
+      const eq = cylP + peak + hop - funnel;          // grain-equivalent volume
+      const bu = eq * BU_PER_FT3;
       // "cyl + peak + hopper − funnel", written out with whichever parts apply
-      const parts = [['cyl', cyl, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
+      const parts = [[packF > 1 ? 'packed' : 'cyl', cylP, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
       if (parts.length > 1) {
         const f = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + p[0]).join('');
         const s = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + n(p[1])).join('');
-        work.push(step('Total volume', f, s, `${n(ft3)} ft³`));
+        work.push(step('Total', f, s, `${n(eq)} ft³`));
       }
-      work.push(step('Bushels', packF > 1 ? 'ft³ × 0.8036 × (1 + k)' : 'ft³ × 0.8036', packF > 1 ? `${n(ft3)} × 0.8036 × ${n(packF, 3)}` : `${n(ft3)} × 0.8036`, `${n(bu)} bu`, true));
+      work.push(step('Bushels', 'ft³ × 0.8036', `${n(eq)} × 0.8036`, `${n(bu)} bu`, true));
       return {
         results: [
           { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
+          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
           ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
           ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * packF * ctx.tw, dim: 'grain' }] : []),
+          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * ctx.tw, dim: 'grain' }] : []),
           ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
           { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
         ],
         work,
-        notes: ['1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
+        notes: [R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
         links: [{ calc: 'grain-drying', label: 'Grain drying', values: { crop: v.crop, wet: bu * ctx.tw } }],
       };
     },
@@ -918,7 +975,7 @@ __exp.default = [
         results: [
           { label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
           { label: 'Pile height', value: h, dim: 'length', unitSet: ['ft', 'm'] },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
+          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
         ],
         work,
@@ -964,7 +1021,7 @@ __mods['js/calcs/yield.js'] = (function () {
 const __exp = {};
 const { n, step, fail } = __mods['js/calcs/_h.js'];
 
-const rowWidth = def => ({ name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def, defMetric: Math.round(def * 2.54) });
+const rowWidth = def => ({ name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def, defMetric: Math.round(def * 2.54), defSk: 10 });   // prairie drills ≈ 10"
 const FT_M = ['ft', 'm'];
 
 // 1 lb = 453.592 g, so seeds per lb = 453,592 ÷ thousand-seed weight (g)
@@ -1099,6 +1156,26 @@ __mods['js/calcs/fieldops.js'] = (function () {
 const __exp = {};
 const { n, step, fail } = __mods['js/calcs/_h.js'];
 const FIELD_LEN = ['ft', 'yd', 'rod', 'mi', 'm', 'km'];
+// Typical rated flow of gas trash pumps by outlet size (US gpm, near zero lift).
+// From manufacturer listings: 2" ≈ 140–210, 3" ≈ 225–400, 4" ≈ 500, 6" ≈ 1,000–1,300.
+// We use the middle of each range and interpolate; outside 2–6" flow scales ≈ size^1.7.
+const PUMP_GPM = [[2, 160], [3, 300], [4, 500], [6, 1100]];
+function pumpGpmFromOutlet(inches) {
+  const d = inches, t = PUMP_GPM;
+  if (!(d > 0)) return NaN;
+  if (d <= t[0][0]) return t[0][1] * Math.pow(d / t[0][0], 1.7);
+  if (d >= t[t.length - 1][0]) return t[t.length - 1][1] * Math.pow(d / t[t.length - 1][0], 1.7);
+  for (let i = 1; i < t.length; i++) {
+    if (d <= t[i][0]) { const [d0, q0] = t[i - 1], [d1, q1] = t[i]; return q0 + (q1 - q0) * (d - d0) / (d1 - d0); }
+  }
+  return NaN;
+}
+// Slough shapes: water volume = surface area × deepest depth × factor
+//   saucer: gentle slopes, deep only in the middle (a cone, 1/3)
+//   bowl:   typical slough (a rounded bowl, 1/2)
+//   flat:   steep banks, flat bottom (about 0.8)
+const SHAPES = { saucer: 1 / 3, bowl: 0.5, flat: 0.8 };
+
 
 __exp.default = [
   {
@@ -1109,7 +1186,7 @@ __exp.default = [
     desc: 'Acres per hour from implement width, speed and field efficiency.',
     fields: [
       { name: 'w', label: 'Implement width', sym: 'W', dim: 'length', unitSet: ['ft', 'm'], def: 40, defMetric: 12 },
-      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 6, defMetric: 10 },
+      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 6, defMetric: 10, defSk: 9 },
       { name: 'eff', label: 'Field efficiency', sym: 'E', unit: '%', def: 75, help: 'Tillage 80–90% · Planting 60–75% · Spraying 55–70% · Combine 65–80%' },
       { name: 'hours', label: 'Hours per day', sym: 'h', unit: 'hr', def: 10, optional: true },
     ],
@@ -1227,7 +1304,67 @@ __exp.default = [
       };
     },
   },
+  {
+    id: 'slough-pumping',
+    summary: ['Water volume', 'Pump rate'],   // supporting results on a notebook summary card
+    title: 'Slough Pumping',
+    category: 'fieldops',
+    desc: 'How much water is in a slough and how many hours your pump needs to drain it.',
+    fields: [
+      { name: 'mode', label: 'Slough size from', type: 'select', def: 'dims', options: [{ value: 'dims', label: 'Length × width' }, { value: 'area', label: 'Acres' }] },
+      { name: 'len', label: 'Length (water edge)', sym: 'L', dim: 'length', unitSet: ['ft', 'yd', 'm'], def: 300, defMetric: 90, show: v => v.mode === 'dims', help: 'Pace it off: 1 long pace ≈ 3 ft' },
+      { name: 'wid', label: 'Width (water edge)', sym: 'W', dim: 'length', unitSet: ['ft', 'yd', 'm'], def: 150, defMetric: 45, show: v => v.mode === 'dims' },
+      { name: 'area', label: 'Water area', sym: 'A', dim: 'area', def: 1, defMetric: 0.4, show: v => v.mode === 'area', help: 'From a field map or GPS' },
+      { name: 'depth', label: 'Depth at deepest point', sym: 'D', dim: 'length', unitSet: ['ft', 'in', 'm'], def: 3, defMetric: 1 },
+      {
+        name: 'shape', label: 'Shape', type: 'select', def: 'bowl', help: 'Saucer: deep only in the middle · Bowl: most sloughs · Flat: steep banks',
+        options: [{ value: 'saucer', label: 'Saucer' }, { value: 'bowl', label: 'Bowl' }, { value: 'flat', label: 'Flat bottom' }],
+      },
+      { name: 'outlet', label: 'Pump outlet size', sym: 'Ø', unit: 'in', def: 3, help: v => (v.outlet > 0 ? `Typical rating ≈ ${n(pumpGpmFromOutlet(v.outlet), 0)} US gpm (${n(pumpGpmFromOutlet(v.outlet) * 60, 0)} gph)` : 'Discharge size, e.g. 2, 3, 4 or 6') },
+      { name: 'rated', label: 'Rated flow (if known)', sym: 'Q', dim: 'flow', unitSet: ['gpm', 'gph', 'lpm'], def: null, optional: true, help: 'From the pump plate or manual; leave blank to estimate from outlet size' },
+      { name: 'eff', label: 'Real-world flow', sym: 'E', unit: '%', def: 65, help: 'Lift, hose length and debris cut flow; 50–80% of rating is typical' },
+      { name: 'hpd', label: 'Hours pumping per day', sym: 'h', unit: 'hr', def: null, optional: true },
+    ],
+    compute(v) {
+      const factor = SHAPES[v.shape] || 0.5;
+      const ft2 = v.mode === 'area' ? v.area * 43560 : Math.PI / 4 * v.len * v.wid;
+      if (!(ft2 > 0) || !(v.depth > 0)) return fail('Enter the slough size and depth.');
+      const ft3 = ft2 * v.depth * factor;
+      const gal = ft3 * 7.48051948;
+      const ratedGpm = v.rated || pumpGpmFromOutlet(v.outlet);
+      if (!(ratedGpm > 0)) return fail('Enter the pump outlet size or its rated flow.');
+      if (!(v.eff > 0)) return fail('Real-world flow must be more than 0%.');
+      const gph = ratedGpm * 60 * v.eff / 100;
+      const hours = gal / gph;
+      const hh = Math.floor(hours), mm = Math.round((hours - hh) * 60);
+      const work = [];
+      if (v.mode === 'area') work.push(step('Surface area', 'acres × 43,560', `${n(v.area, 2)} × 43,560`, `${n(ft2)} ft²`));
+      else work.push(step('Surface area (oval)', 'π ÷ 4 × L × W', `0.7854 × ${n(v.len)} × ${n(v.wid)}`, `${n(ft2)} ft²`));
+      work.push(
+        step('Water volume', `area × D × ${v.shape === 'saucer' ? '⅓' : v.shape === 'flat' ? '0.8' : '½'} (${v.shape === 'flat' ? 'flat bottom' : v.shape})`, `${n(ft2)} × ${n(v.depth, 2)} × ${n(factor, 3)}`, `${n(ft3)} ft³`),
+        step('In gallons', 'ft³ × 7.48', `${n(ft3)} × 7.48`, `${n(gal)} gal`),
+        step('Pump rate', v.rated ? 'Q × 60 × E' : `${n(v.outlet)}″ pump ≈ ${n(ratedGpm, 0)} gpm × 60 × E`, `${n(ratedGpm, 0)} × 60 × ${n(v.eff)}%`, `${n(gph)} gph`),
+        step('Time to pump', 'gal ÷ gph', `${n(gal)} ÷ ${n(gph)}`, `${n(hours, 1)} hr`, !v.hpd),
+      );
+      const results = [
+        { label: 'Time to pump', value: hours, unit: 'hr', decimals: 1, primary: true },
+        { label: 'As hours & minutes', text: `${hh} h ${mm} m` },
+        { label: 'Water volume', value: gal, dim: 'volume', units: { us: 'gal', metric: 'L', sk: 'gal' }, unitSet: ['gal', 'L', 'm3', 'acft'] },
+        { label: 'Pump rate', value: gph / 60, dim: 'flow', units: { us: 'gph', metric: 'lph', sk: 'gph' }, unitSet: ['gph', 'gpm', 'lph', 'lpm'] },
+        { label: 'Surface area', value: ft2 / 43560, dim: 'area', decimals: 2 },
+      ];
+      if (v.hpd) {
+        results.push({ label: 'Days', value: hours / v.hpd, unit: 'days', decimals: 1 });
+        work.push(step('Days', 'hours ÷ h', `${n(hours, 1)} ÷ ${n(v.hpd)}`, `${n(hours / v.hpd, 1)} days`, true));
+      }
+      return {
+        results, work,
+        notes: ['Gallons are US gallons, the same as pump ratings. Real flow drops with more lift and longer hose.'],
+      };
+    },
+  },
 ];
+Object.assign(__exp, { pumpGpmFromOutlet });
 return __exp;
 })();
 
@@ -1242,12 +1379,13 @@ __exp.default = [
     summary: ['Seeds to plant', 'Units per acre'],   // supporting results on a notebook summary card
     title: 'Seeding Rate',
     category: 'seeding',
-    desc: 'Seeds per acre to lb/ac, bu/ac and seed units, adjusted for germination.',
+    desc: 'Target seeds (per ft², acre or m²) to lb/ac, bu/ac and seed units, adjusted for germination and purity.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'target', label: 'Target live seeds', sym: 'T', dim: 'countRate', def: 34000, cropDefault: 'target' },
+      // seeds/ft² is how small-grain rates are usually given on the prairies; tap the unit for /ac, /m², /ha
+      { name: 'target', label: 'Target live seeds', sym: 'T', dim: 'countRate', units: { us: 'pft2', metric: 'pm2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], def: 30, cropDefault: 'target' },
       { name: 'germ', label: 'Germination', sym: 'G', unit: '%', def: 95 },
-      { name: 'purity', label: 'Purity', sym: 'P', unit: '%', def: 100, optional: true, help: 'From the seed tag; mostly for small grains & forages' },
+      { name: 'purity', label: 'Purity', sym: 'P', unit: '%', def: 100, optional: true, help: 'Pure seed % from the seed analysis/tag. The rest is chaff, weed seed or other crops. Certified seed is usually 98–99.9%' },
       { name: 'seedsLb', label: 'Seeds per lb', sym: 'S', unit: 'seeds/lb', def: 1600, cropDefault: 'seedsLb' },
       { name: 'unitSize', label: 'Seeds per unit/bag', sym: 'U', unit: 'seeds', def: 80000, cropDefault: 'unit', optional: true, help: 'Corn 80,000 · Soybeans 140,000 · blank if sold by weight' },
       { name: 'acres', label: 'Acres to plant', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
@@ -1258,14 +1396,18 @@ __exp.default = [
       const drop = v.target / pls;
       const lbAc = drop / v.seedsLb;
       const buAc = lbAc / ctx.tw;
-      const work = [
+      const work = [];
+      // a target entered per ft², m² or ha is worked out per acre first
+      const per = { pft2: ['T × 43,560 ft²', 43560, ' × 43,560'], pm2: ['T × 4,046.9 m²', 4046.8564224, ' × 4,046.9'], pha: ['T ÷ 2.471 ac/ha', 1 / 2.4710538147, ' ÷ 2.471'] }[v.targetUnit];
+      if (per) work.push(step('Target per acre', per[0], `${n(v.target / per[1], 2)}${per[2]}`, `${n(v.target)} seeds/ac`));
+      work.push(
         step('Pure live seed', v.purity && v.purity !== 100 ? 'G × P' : 'G', v.purity && v.purity !== 100 ? `${n(v.germ)}% × ${n(v.purity)}%` : `${n(v.germ)}%`, `${n(pls * 100, 2)}%`),
         step('Seeds to plant', 'T ÷ PLS', `${n(v.target)} ÷ ${n(pls, 4)}`, `${n(drop)} seeds/ac`),
         step('Pounds per acre', 'seeds ÷ S', `${n(drop)} ÷ ${n(v.seedsLb)}`, `${n(lbAc, 1)} lb/ac`, !v.unitSize),
-      ];
+      );
       const results = [
         { label: 'Seeding rate', value: lbAc, dim: 'massRate', primary: true },
-        { label: 'Seeds to plant', value: drop, dim: 'countRate' },
+        { label: 'Seeds to plant', value: drop, dim: 'countRate', units: { us: 'pft2', metric: 'pm2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'] },
         { label: 'Bushels per acre', value: buAc, unit: 'bu/ac', decimals: 2 },
       ];
       if (v.unitSize) {
@@ -1293,11 +1435,11 @@ __exp.default = [
     category: 'seeding',
     desc: 'Plants per acre from stand counts in a length of row.',
     fields: [
-      { name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 30, defMetric: 76 },
-      { name: 'len', label: 'Length of row counted', sym: 'L', dim: 'length', unitSet: ['ft', 'in', 'm', 'cm'], def: 17.42, defMetric: 5.3, help: '17 ft 5 in = 1/1000 ac in 30" rows' },
-      { name: 'plants', label: 'Plants counted (total)', sym: 'P', unit: 'plants', def: 34, help: 'Tip: type 34+32+35 to add several counts' },
+      { name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 30, defMetric: 76, defSk: 10 },
+      { name: 'len', label: 'Length of row counted', sym: 'L', dim: 'length', unitSet: ['ft', 'in', 'm', 'cm'], def: 17.42, defMetric: 5.3, defSk: 3, help: 'e.g. 3 ft of row; in 10" rows that is 2.5 ft²' },
+      { name: 'plants', label: 'Plants counted (total)', sym: 'P', unit: 'plants', def: 34, defSk: 62, help: 'Tip: type 34+32+35 to add several counts' },
       { name: 'counts', label: 'Number of counts', sym: 'N', unit: '', def: 1 },
-      { name: 'target', label: 'Target population', sym: 'T', dim: 'countRate', def: 34000, optional: true },
+      { name: 'target', label: 'Target population', sym: 'T', dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], def: 34000, defSk: 25, optional: true },
     ],
     compute(v) {
       const areaFt2 = v.len * v.rw;
@@ -1305,7 +1447,7 @@ __exp.default = [
       const avg = v.plants / v.counts;
       const pop = avg * 43560 / areaFt2;
       const results = [
-        { label: 'Population', value: pop, dim: 'countRate', primary: true },
+        { label: 'Population', value: pop, dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], primary: true },
         { label: 'Average per count', value: avg, unit: 'plants', decimals: 1 },
         { label: 'Plant spacing', value: v.len / avg, dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'] },
       ];
@@ -1378,12 +1520,17 @@ const RATE_CHOICES = [
   { value: 'galac', label: 'gal/ac', amt: 'gal', kind: 'liq' },
   { value: 'ozac', label: 'oz/ac (dry)', amt: 'oz', kind: 'dry' },
   { value: 'lbac', label: 'lb/ac', amt: 'lb', kind: 'dry' },
+  // Canadian labels (Sask units): metric amounts per acre
+  { value: 'mLac', label: 'mL/ac', amt: 'mL', kind: 'liq', sk: true },
+  { value: 'Lac', label: 'L/ac', amt: 'L', kind: 'liq', sk: true },
+  { value: 'gac', label: 'g/ac', amt: 'g', kind: 'dry', sk: true },
+  { value: 'kgac', label: 'kg/ac', amt: 'kg', kind: 'dry', sk: true },
   { value: 'mLha', label: 'mL/ha', amt: 'mL', kind: 'liq', ha: true },
   { value: 'Lha', label: 'L/ha', amt: 'L', kind: 'liq', ha: true },
   { value: 'gha', label: 'g/ha', amt: 'g', kind: 'dry', ha: true },
   { value: 'kgha', label: 'kg/ha', amt: 'kg', kind: 'dry', ha: true },
 ];
-const RATE_DEFAULT = { us: 'flozac', metric: 'Lha' };
+const RATE_DEFAULT = { us: 'flozac', metric: 'Lha', sk: 'Lac' };
 
 // Express an amount in a friendlier larger unit when it gets big
 function friendly(x, amt) {
@@ -1395,7 +1542,7 @@ function friendly(x, amt) {
 
 const product = (i, def) => ({
   name: `p${i}`, label: `Product ${String.fromCharCode(64 + i)} rate`, sym: String.fromCharCode(64 + i),
-  choices: RATE_CHOICES, choiceDefault: RATE_DEFAULT, def, optional: i > 1,
+  choices: RATE_CHOICES, choiceDefault: RATE_DEFAULT, def, defs: def ? { flozac: def, Lac: 0.5, Lha: 1.2 } : undefined, optional: i > 1,
 });
 
 __exp.default = [
@@ -1407,8 +1554,8 @@ __exp.default = [
     fields: [
       { name: 'mode', label: 'Solve for', type: 'select', def: 'gpa', options: [{ value: 'gpa', label: 'Application rate (GPA)' }, { value: 'gpm', label: 'Nozzle flow needed' }] },
       { name: 'gpm', label: 'Nozzle flow', sym: 'Q', dim: 'flow', def: 0.3, defMetric: 1.2, show: v => v.mode === 'gpa', help: 'Catch for 1 minute: fl oz ÷ 128 = gal/min' },
-      { name: 'gpa', label: 'Target rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, show: v => v.mode === 'gpm' },
-      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 10, defMetric: 16 },
+      { name: 'gpa', label: 'Target rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40, show: v => v.mode === 'gpm' },
+      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 10, defMetric: 16, defSk: 20 },
       { name: 'spacing', label: 'Nozzle spacing', sym: 'W', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 20, defMetric: 50 },
     ],
     compute(v) {
@@ -1443,10 +1590,23 @@ __exp.default = [
     summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
+    // Reference card shown under the results: the standard W-A-L-E-S mixing order.
+    info: {
+      title: 'Mixing order (W-A-L-E-S)',
+      intro: 'Start with a clean tank. Fill it ½ to ¾ with water and start the agitator. Add a water conditioner (e.g. AMS) first if a label calls for it. Then add products in this order, letting each one mix in before the next:',
+      steps: [
+        ['W', 'Wettable powders & dry granules', 'WP, WG, WDG, DF. Pre-mix in water first if the label says to.'],
+        ['A', 'Agitate', 'Keep agitating until the dry products are fully dispersed, and keep it running for the rest of the fill.'],
+        ['L', 'Liquid flowables & suspensions', 'F, SC, CS, SE.'],
+        ['E', 'Emulsifiable concentrates', 'EC, EW, ME.'],
+        ['S', 'Solutions & surfactants', 'SL, SN and other solutions, then surfactants, oils and other adjuvants last.'],
+      ],
+      outro: 'Top up with water to the full volume while agitating, and spray soon after mixing. Product labels come first: if a label gives a different order, follow the label. Try a jar test before mixing a new combination.',
+    },
     desc: 'Acres per tank and how much of each product goes in the tank.',
     fields: [
-      { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000 },
-      { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140 },
+      { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000, defSk: 4500 },
+      { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40 },
       product(1, 32), product(2, null), product(3, null),
       { name: 'acres', label: 'Field size', sym: 'F', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
@@ -1478,7 +1638,7 @@ __exp.default = [
         if (partAc > 0.01) results.push({ label: 'Last partial load', value: partAc * v.gpa, dim: 'volume' });
         work.push(step('Loads', 'F ÷ ac/tank', `${n(v.acres)} ÷ ${n(acTank)}`, `${n(tanks, 2)} tanks`, true));
       }
-      return { results, work, notes: ['Fill the tank half full with water before adding products, in label order.'] };
+      return { results, work, notes: ['Add products in mixing order. See the card below.'] };
     },
   },
 ];
@@ -1491,7 +1651,7 @@ const __exp = {};
 const { n, m, step, fail } = __mods['js/calcs/_h.js'];
 
 const PRICE_CHOICES = [{ value: 'ton', label: '/ton', lb: 2000 }, { value: 't', label: '/t', lb: 2204.6226 }];
-const priceField = (name, label, def, show) => ({ name, label, money: true, choices: PRICE_CHOICES, choiceDefault: { us: 'ton', metric: 't' }, def, optional: true, show });
+const priceField = (name, label, def, show) => ({ name, label, money: true, choices: PRICE_CHOICES, choiceDefault: { us: 'ton', metric: 't', sk: 't' }, def, optional: true, show });
 const perLb = (price, unit) => price / (PRICE_CHOICES.find(c => c.value === unit) || PRICE_CHOICES[0]).lb;
 
 const P_SOURCES = { map: { label: 'MAP 11-52-0', n: 11, p: 52 }, dap: { label: 'DAP 18-46-0', n: 18, p: 46 } };
@@ -1690,7 +1850,7 @@ return __exp;
 __mods['js/calcs/convert.js'] = (function () {
 const __exp = {};
 const { n, step, fail } = __mods['js/calcs/_h.js'];
-const { DIMS, PREF, convert, toBase, unitLabel } = __mods['js/units.js'];
+const { DIMS, PREF, convert, toBase, unitLabel, defaultUnit } = __mods['js/units.js'];
 
 const GENERAL = Object.keys(DIMS).filter(d => !DIMS[d].crop);
 const unitOpts = (dim, cur) => Object.keys(DIMS[dim].units).map(value => ({ value, label: unitLabel(dim, value, cur) }));
@@ -1716,8 +1876,8 @@ __exp.default = [
     fields: [
       { name: 'dim', label: 'Type', type: 'select', def: 'mass', options: GENERAL.map(value => ({ value, label: DIMS[value].label })) },
       { name: 'value', label: 'Value', sym: 'x', unit: '', def: 1 },
-      { name: 'from', label: 'From', type: 'select', def: 'lb', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => PREF[v.dim]?.[s] || DIMS[v.dim].base },
-      { name: 'to', label: 'To', type: 'select', def: 'kg', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => PREF[v.dim]?.[s === 'us' ? 'metric' : 'us'] || Object.keys(DIMS[v.dim].units)[1] },
+      { name: 'from', label: 'From', type: 'select', def: 'lb', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => defaultUnit(v.dim, s) },
+      { name: 'to', label: 'To', type: 'select', def: 'kg', options: (v, ctx) => unitOpts(v.dim, ctx.cur), pick: (v, s) => { const a = defaultUnit(v.dim, s), m = defaultUnit(v.dim, 'metric'); return a === m ? defaultUnit(v.dim, 'us') : m; } },
     ],
     compute(v, ctx) {
       const { dim, from, to, value } = v;
@@ -1780,16 +1940,17 @@ const fertilizer = __mods['js/calcs/fertilizer.js'].default;
 const marketing = __mods['js/calcs/marketing.js'].default;
 const convert = __mods['js/calcs/convert.js'].default;
 
+// Order on the home screen: most-used first
 const CATEGORIES = [
-  { id: 'drying', label: 'Grain Drying', icon: 'drying' },
-  { id: 'storage', label: 'Grain Storage', icon: 'storage' },
+  { id: 'convert', label: 'Convert', icon: 'convert' },
   { id: 'yield', label: 'Yield', icon: 'yield' },
   { id: 'fieldops', label: 'Field Ops', icon: 'fieldops' },
+  { id: 'drying', label: 'Grain Drying', icon: 'drying' },
+  { id: 'storage', label: 'Grain Storage', icon: 'storage' },
   { id: 'seeding', label: 'Seeding', icon: 'seeding' },
   { id: 'spraying', label: 'Spraying', icon: 'spraying' },
   { id: 'fertilizer', label: 'Fertilizer', icon: 'fertilizer' },
   { id: 'marketing', label: 'Marketing', icon: 'marketing' },
-  { id: 'convert', label: 'Convert', icon: 'convert' },
 ];
 
 const CALCS = [...drying, ...storage, ...yieldCalcs, ...fieldops, ...seeding, ...spraying, ...fertilizer, ...marketing, ...convert];
@@ -1810,7 +1971,7 @@ const { setDecimals } = __mods['js/format.js'];
 // ---------- Settings ----------
 const SETTINGS_KEY = 'farmcalc.settings';
 const DEFAULT_SETTINGS = {
-  system: 'us',          // 'us' | 'metric'
+  system: 'sk',          // 'sk' (Saskatchewan / prairie mix) | 'us' | 'metric'
   crop: 'wheat',         // default crop for every calculator (Settings → Default crop)
   decimals: 'auto',      // 'auto' | '0'..'4'
   currency: '$',
@@ -1829,6 +1990,17 @@ setDecimals(settings.decimals);
 // One-time switch from the old corn default to wheat. Calculators whose last
 // inputs were left on corn start fresh, so they open with wheat values
 // (test weight, moisture, yield...). Runs once; picking corn again later sticks.
+// One-time switch of the old US default to the new Sask units (calculators reopen
+// with Sask starting values; saved inputs belong to the old system so they're skipped).
+(function switchToSaskUnits() {
+  const FLAG = 'farmcalc.migrated.saskUnits';
+  if (lsGet(FLAG)) return;
+  lsSet(FLAG, '1');
+  if (settings.system !== 'us') return;
+  settings.system = 'sk';
+  lsSet(SETTINGS_KEY, JSON.stringify(settings));
+})();
+
 (function switchDefaultCropToWheat() {
   const FLAG = 'farmcalc.migrated.wheatDefault';
   if (lsGet(FLAG)) return;
@@ -2100,17 +2272,17 @@ const __exp = {};
 //   repose    angle of repose for piled grain (degrees)
 //   seedsLb   typical seeds per lb
 //   unit      seeds per seed unit/bag (0 = sold by weight)
-//   target    typical target seeding rate (seeds/ac)
+//   target    typical target seeding rate (seeds/ac; small grains are round numbers per ft², e.g. wheat 30/ft²)
 //   seedLbAc  typical seeding rate by weight (lb/ac), for crops sold by weight
 //   seedPrice seed price: per unit/bag if sold by count, else per lb (rough placeholder)
 //   yld       a typical yield (bu/ac) as a starting point
 //   price     a rough cash price ($/bu) as a starting point; type your own
 const CROPS = {
-  wheat:     { label: 'Wheat',     tw: 60, moist: 13.5, harvest: 18, repose: 25, seedsLb: 14000,  unit: 0,      target: 1300000, seedLbAc: 90, seedPrice: 0.3,  yld: 60,  price: 6 },
-  barley:    { label: 'Barley',    tw: 48, moist: 14.5, harvest: 18, repose: 28, seedsLb: 13000,  unit: 0,      target: 1100000, seedLbAc: 96, seedPrice: 0.28, yld: 80,  price: 5 },
-  oats:      { label: 'Oats',      tw: 32, moist: 14,   harvest: 18, repose: 28, seedsLb: 15000,  unit: 0,      target: 1200000, seedLbAc: 90, seedPrice: 0.3,  yld: 100, price: 3.5 },
-  canola:    { label: 'Canola',    tw: 50, moist: 10,   harvest: 12, repose: 22, seedsLb: 100000, unit: 0,      target: 500000,  seedLbAc: 5,  seedPrice: 9,    yld: 50,  price: 13 },
-  rye:       { label: 'Rye',       tw: 56, moist: 14,   harvest: 18, repose: 26, seedsLb: 18000,  unit: 0,      target: 1300000, seedLbAc: 90, seedPrice: 0.35, yld: 50,  price: 6 },
+  wheat:     { label: 'Wheat',     tw: 60, moist: 13.5, harvest: 18, repose: 25, seedsLb: 14000,  unit: 0,      target: 1306800, seedLbAc: 90, seedPrice: 0.3,  yld: 60,  price: 6 },
+  barley:    { label: 'Barley',    tw: 48, moist: 14.5, harvest: 18, repose: 28, seedsLb: 13000,  unit: 0,      target: 1089000, seedLbAc: 96, seedPrice: 0.28, yld: 80,  price: 5 },
+  oats:      { label: 'Oats',      tw: 32, moist: 14,   harvest: 18, repose: 28, seedsLb: 15000,  unit: 0,      target: 1219680, seedLbAc: 90, seedPrice: 0.3,  yld: 100, price: 3.5 },
+  canola:    { label: 'Canola',    tw: 50, moist: 10,   harvest: 12, repose: 22, seedsLb: 100000, unit: 0,      target: 522720,  seedLbAc: 5,  seedPrice: 9,    yld: 50,  price: 13 },
+  rye:       { label: 'Rye',       tw: 56, moist: 14,   harvest: 18, repose: 26, seedsLb: 18000,  unit: 0,      target: 1306800, seedLbAc: 90, seedPrice: 0.35, yld: 50,  price: 6 },
   corn:      { label: 'Corn',      tw: 56, moist: 15.5, harvest: 25, repose: 23, seedsLb: 1600,   unit: 80000,  target: 34000,   seedLbAc: 0,  seedPrice: 300,  yld: 200, price: 4.5 },
   soybeans:  { label: 'Soybeans',  tw: 60, moist: 13,   harvest: 16, repose: 25, seedsLb: 2800,   unit: 140000, target: 140000,  seedLbAc: 0,  seedPrice: 60,   yld: 55,  price: 10.5 },
   sorghum:   { label: 'Sorghum',   tw: 56, moist: 14,   harvest: 20, repose: 27, seedsLb: 15000,  unit: 0,      target: 100000,  seedLbAc: 6,  seedPrice: 1.8,  yld: 100, price: 4.2 },
@@ -2132,7 +2304,7 @@ const __exp = {};
 // values, runs the definition's compute(), and builds notebook snapshots.
 // No DOM here, so tests can drive it directly.
 const { CROPS } = __mods['js/crops.js'];
-const { DIMS, toBase, fromBase, defaultUnit, unitLabel, practicalUnits } = __mods['js/units.js'];
+const { DIMS, toBase, fromBase, defaultUnit, unitLabel, practicalUnits, sideFor } = __mods['js/units.js'];
 const { parseNum, fmt, fmtInput, money } = __mods['js/format.js'];
 
 const fieldType = f => f.type || 'number';
@@ -2162,7 +2334,7 @@ function isShown(f, values, units = {}) { return !f.show || f.show(values, units
 /** Unit id to show for a number field (dim units or choice list) */
 function initialUnit(f, system) {
   if (f.dim) return defaultUnit(f.dim, system, f.units);
-  if (f.choices) return (f.choiceDefault && f.choiceDefault[system]) || f.choices[0].value;
+  if (f.choices) return (f.choiceDefault && (f.choiceDefault[system] || (system === 'sk' && f.choiceDefault.us))) || f.choices[0].value;
   return null;
 }
 
@@ -2171,8 +2343,10 @@ function unitChoices(f, system, current) {
   if (f.dim) return practicalUnits(f.dim, f.unitSet, current);
   if (f.choices) {
     // per-hectare choices for metric, per-acre for US (spray product rates)
-    const split = f.choices.some(c => c.ha);
-    let list = split ? f.choices.filter(c => !!c.ha === (system === 'metric')) : f.choices.slice();
+    // choice lists can be split by system: per-hectare (ha) for metric, Canadian-label units (sk) for Sask
+    const split = f.choices.some(c => c.ha || c.sk);
+    let list = !split ? f.choices.slice()
+      : f.choices.filter(c => (system === 'metric' ? c.ha : system === 'sk' ? c.sk : !c.ha && !c.sk));
     if (current && !list.some(c => c.value === current)) list = [f.choices.find(c => c.value === current), ...list].filter(Boolean);
     return list.map(c => c.value);
   }
@@ -2214,6 +2388,8 @@ function initState(def, settings, saved, prefill) {
     }
     if (saved?.values?.[f.name] !== undefined) val = saved.values[f.name];
     if (prefill && prefill[f.name] !== undefined) val = prefill[f.name];
+    // reopening an entry saved before this field existed: use its `legacy` value
+    else if (prefill && f.legacy !== undefined) val = f.legacy;
     state.values[f.name] = val;
   }
   const ctx0 = makeCtx(def, state, settings);
@@ -2229,13 +2405,20 @@ function initState(def, settings, saved, prefill) {
       const fromCrop = cropVal !== undefined;
       const usVal = fromCrop ? cropVal : f.def;
       if (fromCrop && !usVal) text = '';
+      // starting value for Sask (any field, with or without a unit)
+      else if (sys === 'sk' && f.defSk !== undefined && !fromCrop) text = fmtInput(f.defSk);
       else if (!f.dim) text = fmtInput(usVal);
-      else if (sys === 'metric' && f.defMetric !== undefined && !fromCrop) text = fmtInput(f.defMetric);
+      // …and defMetric where the quantity is metric
+      else if (sideFor(f.dim, sys) === 'metric' && f.defMetric !== undefined && !fromCrop) text = fmtInput(f.defMetric);
       else {
-        const usUnit = defaultUnit(f.dim, 'us', f.units);
+        // `def` is in the field's own US unit; crop values are in the standard US unit
+        // for that quantity (seeds/ac, bu/ac, lb/ac…), whatever the field displays
+        const usUnit = fromCrop ? defaultUnit(f.dim, 'us') : defaultUnit(f.dim, 'us', f.units);
         const shown = fromBase(f.dim, toBase(f.dim, usVal, usUnit, ctx0), unit, ctx0);
         text = fmtInput(unit === usUnit ? shown : roundNice(shown));
       }
+      // fields with a unit list can give a starting value per unit (e.g. 32 fl oz/ac, 0.5 L/ac)
+      if (f.choices && f.defs && f.defs[unit] !== undefined) text = fmtInput(f.defs[unit]);
     }
     if (saved?.values?.[f.name] !== undefined) {
       text = saved.values[f.name];
@@ -2281,7 +2464,7 @@ function applyCropDefaults(def, state, settings) {
     if (val === undefined) continue;
     if (fieldType(f) !== 'number') { state.values[f.name] = val; continue; }
     if (!val) { state.values[f.name] = ''; continue; }
-    const usUnit = f.dim ? defaultUnit(f.dim, 'us', f.units) : null;
+    const usUnit = f.dim ? defaultUnit(f.dim, 'us') : null;   // crop values are in the standard US unit (seeds/ac, bu/ac…)
     state.values[f.name] = fmtInput(f.dim ? roundNice(fromBase(f.dim, toBase(f.dim, val, usUnit, ctx), state.units[f.name], ctx)) : val);
   }
 }
@@ -2521,6 +2704,18 @@ function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
+  // optional reference card (e.g. Tank Mix: mixing order); open unless folded away before
+  let infoEl = null;
+  if (def.info) {
+    const I = def.info;
+    infoEl = h('details.info-card', { open: prefs.get('info.' + id, true) },
+      h('summary', icon('note'), h('span', I.title), icon('chevR', 'ic-chev')),
+      I.intro ? h('p.info-intro', I.intro) : null,
+      h('ol.info-steps', I.steps.map(([key, head, detail]) => h('li',
+        h('span.info-key', key), h('div', h('b', head), detail ? h('small', detail) : null)))),
+      I.outro ? h('p.info-outro', I.outro) : null);
+    infoEl.addEventListener('toggle', () => prefs.set('info.' + id, infoEl.open));
+  }
   // Opened from a notebook entry's "Edit inputs" (?edit=<pageId>~<cardId>):
   // the main button rewrites that entry instead of adding a new one.
   const [editPageId, editCardId] = (query.get('edit') || '').split('~');
@@ -2751,6 +2946,7 @@ function renderCalc(view, id, query) {
     fieldsEl,
     resultsEl,
     h('div.actions', addBtn, addNewBtn),
+    infoEl,
     workEl,
     linksEl,
   ].filter(Boolean));
@@ -4434,7 +4630,7 @@ function renderSettings(view) {
           })()))),
     h('div.set-group', h('h2', 'Units'),
       h('div.panel',
-        row('Unit system', 'Default units for new inputs and results', seg('system', [['us', 'US'], ['metric', 'Metric']])),
+        row('Unit system', 'Sask: acres, bushels, lb/ac, ft & in, seeds/ft², with kg/tonnes, km/h, litres and L/ac', seg('system', [['sk', 'Sask'], ['us', 'US'], ['metric', 'Metric']])),
         row('Default crop', null, select('crop', Object.entries(CROPS).map(([k, c]) => [k, c.label]), 'Default crop')),
         row('Decimal places', 'Auto rounds big numbers more', select('decimals', [['auto', 'Auto'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']], 'Decimal places')),
         row('Currency symbol', null, h('input.text-input', { type: 'text', value: settings.currency, maxlength: 3, on: { input: e => saveSettings({ currency: e.target.value || '$' }) } })),

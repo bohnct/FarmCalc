@@ -1,7 +1,7 @@
 import { n, m, step, fail } from './_h.js';
 
 const PRICE_CHOICES = [{ value: 'ton', label: '/ton', lb: 2000 }, { value: 't', label: '/t', lb: 2204.6226 }];
-const priceField = (name, label, def, show) => ({ name, label, money: true, choices: PRICE_CHOICES, choiceDefault: { us: 'ton', metric: 't' }, def, optional: true, show });
+const priceField = (name, label, def, show) => ({ name, label, money: true, choices: PRICE_CHOICES, choiceDefault: { us: 'ton', metric: 't', sk: 't' }, def, optional: true, show });
 const perLb = (price, unit) => price / (PRICE_CHOICES.find(c => c.value === unit) || PRICE_CHOICES[0]).lb;
 
 const P_SOURCES = { map: { label: 'MAP 11-52-0', n: 11, p: 52 }, dap: { label: 'DAP 18-46-0', n: 18, p: 46 } };

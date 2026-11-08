@@ -2,7 +2,7 @@
 // values, runs the definition's compute(), and builds notebook snapshots.
 // No DOM here, so tests can drive it directly.
 import { CROPS } from './crops.js';
-import { DIMS, toBase, fromBase, defaultUnit, unitLabel, practicalUnits } from './units.js';
+import { DIMS, toBase, fromBase, defaultUnit, unitLabel, practicalUnits, sideFor } from './units.js';
 import { parseNum, fmt, fmtInput, money } from './format.js';
 
 export const fieldType = f => f.type || 'number';
@@ -32,7 +32,7 @@ export function isShown(f, values, units = {}) { return !f.show || f.show(values
 /** Unit id to show for a number field (dim units or choice list) */
 export function initialUnit(f, system) {
   if (f.dim) return defaultUnit(f.dim, system, f.units);
-  if (f.choices) return (f.choiceDefault && f.choiceDefault[system]) || f.choices[0].value;
+  if (f.choices) return (f.choiceDefault && (f.choiceDefault[system] || (system === 'sk' && f.choiceDefault.us))) || f.choices[0].value;
   return null;
 }
 
@@ -41,8 +41,10 @@ export function unitChoices(f, system, current) {
   if (f.dim) return practicalUnits(f.dim, f.unitSet, current);
   if (f.choices) {
     // per-hectare choices for metric, per-acre for US (spray product rates)
-    const split = f.choices.some(c => c.ha);
-    let list = split ? f.choices.filter(c => !!c.ha === (system === 'metric')) : f.choices.slice();
+    // choice lists can be split by system: per-hectare (ha) for metric, Canadian-label units (sk) for Sask
+    const split = f.choices.some(c => c.ha || c.sk);
+    let list = !split ? f.choices.slice()
+      : f.choices.filter(c => (system === 'metric' ? c.ha : system === 'sk' ? c.sk : !c.ha && !c.sk));
     if (current && !list.some(c => c.value === current)) list = [f.choices.find(c => c.value === current), ...list].filter(Boolean);
     return list.map(c => c.value);
   }
@@ -84,6 +86,8 @@ export function initState(def, settings, saved, prefill) {
     }
     if (saved?.values?.[f.name] !== undefined) val = saved.values[f.name];
     if (prefill && prefill[f.name] !== undefined) val = prefill[f.name];
+    // reopening an entry saved before this field existed: use its `legacy` value
+    else if (prefill && f.legacy !== undefined) val = f.legacy;
     state.values[f.name] = val;
   }
   const ctx0 = makeCtx(def, state, settings);
@@ -99,13 +103,20 @@ export function initState(def, settings, saved, prefill) {
       const fromCrop = cropVal !== undefined;
       const usVal = fromCrop ? cropVal : f.def;
       if (fromCrop && !usVal) text = '';
+      // starting value for Sask (any field, with or without a unit)
+      else if (sys === 'sk' && f.defSk !== undefined && !fromCrop) text = fmtInput(f.defSk);
       else if (!f.dim) text = fmtInput(usVal);
-      else if (sys === 'metric' && f.defMetric !== undefined && !fromCrop) text = fmtInput(f.defMetric);
+      // …and defMetric where the quantity is metric
+      else if (sideFor(f.dim, sys) === 'metric' && f.defMetric !== undefined && !fromCrop) text = fmtInput(f.defMetric);
       else {
-        const usUnit = defaultUnit(f.dim, 'us', f.units);
+        // `def` is in the field's own US unit; crop values are in the standard US unit
+        // for that quantity (seeds/ac, bu/ac, lb/ac…), whatever the field displays
+        const usUnit = fromCrop ? defaultUnit(f.dim, 'us') : defaultUnit(f.dim, 'us', f.units);
         const shown = fromBase(f.dim, toBase(f.dim, usVal, usUnit, ctx0), unit, ctx0);
         text = fmtInput(unit === usUnit ? shown : roundNice(shown));
       }
+      // fields with a unit list can give a starting value per unit (e.g. 32 fl oz/ac, 0.5 L/ac)
+      if (f.choices && f.defs && f.defs[unit] !== undefined) text = fmtInput(f.defs[unit]);
     }
     if (saved?.values?.[f.name] !== undefined) {
       text = saved.values[f.name];
@@ -151,7 +162,7 @@ export function applyCropDefaults(def, state, settings) {
     if (val === undefined) continue;
     if (fieldType(f) !== 'number') { state.values[f.name] = val; continue; }
     if (!val) { state.values[f.name] = ''; continue; }
-    const usUnit = f.dim ? defaultUnit(f.dim, 'us', f.units) : null;
+    const usUnit = f.dim ? defaultUnit(f.dim, 'us') : null;   // crop values are in the standard US unit (seeds/ac, bu/ac…)
     state.values[f.name] = fmtInput(f.dim ? roundNice(fromBase(f.dim, toBase(f.dim, val, usUnit, ctx), state.units[f.name], ctx)) : val);
   }
 }

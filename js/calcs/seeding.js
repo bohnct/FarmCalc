@@ -6,12 +6,13 @@ export default [
     summary: ['Seeds to plant', 'Units per acre'],   // supporting results on a notebook summary card
     title: 'Seeding Rate',
     category: 'seeding',
-    desc: 'Seeds per acre to lb/ac, bu/ac and seed units, adjusted for germination.',
+    desc: 'Target seeds (per ft², acre or m²) to lb/ac, bu/ac and seed units, adjusted for germination and purity.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'target', label: 'Target live seeds', sym: 'T', dim: 'countRate', def: 34000, cropDefault: 'target' },
+      // seeds/ft² is how small-grain rates are usually given on the prairies; tap the unit for /ac, /m², /ha
+      { name: 'target', label: 'Target live seeds', sym: 'T', dim: 'countRate', units: { us: 'pft2', metric: 'pm2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], def: 30, cropDefault: 'target' },
       { name: 'germ', label: 'Germination', sym: 'G', unit: '%', def: 95 },
-      { name: 'purity', label: 'Purity', sym: 'P', unit: '%', def: 100, optional: true, help: 'From the seed tag; mostly for small grains & forages' },
+      { name: 'purity', label: 'Purity', sym: 'P', unit: '%', def: 100, optional: true, help: 'Pure seed % from the seed analysis/tag. The rest is chaff, weed seed or other crops. Certified seed is usually 98–99.9%' },
       { name: 'seedsLb', label: 'Seeds per lb', sym: 'S', unit: 'seeds/lb', def: 1600, cropDefault: 'seedsLb' },
       { name: 'unitSize', label: 'Seeds per unit/bag', sym: 'U', unit: 'seeds', def: 80000, cropDefault: 'unit', optional: true, help: 'Corn 80,000 · Soybeans 140,000 · blank if sold by weight' },
       { name: 'acres', label: 'Acres to plant', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
@@ -22,14 +23,18 @@ export default [
       const drop = v.target / pls;
       const lbAc = drop / v.seedsLb;
       const buAc = lbAc / ctx.tw;
-      const work = [
+      const work = [];
+      // a target entered per ft², m² or ha is worked out per acre first
+      const per = { pft2: ['T × 43,560 ft²', 43560, ' × 43,560'], pm2: ['T × 4,046.9 m²', 4046.8564224, ' × 4,046.9'], pha: ['T ÷ 2.471 ac/ha', 1 / 2.4710538147, ' ÷ 2.471'] }[v.targetUnit];
+      if (per) work.push(step('Target per acre', per[0], `${n(v.target / per[1], 2)}${per[2]}`, `${n(v.target)} seeds/ac`));
+      work.push(
         step('Pure live seed', v.purity && v.purity !== 100 ? 'G × P' : 'G', v.purity && v.purity !== 100 ? `${n(v.germ)}% × ${n(v.purity)}%` : `${n(v.germ)}%`, `${n(pls * 100, 2)}%`),
         step('Seeds to plant', 'T ÷ PLS', `${n(v.target)} ÷ ${n(pls, 4)}`, `${n(drop)} seeds/ac`),
         step('Pounds per acre', 'seeds ÷ S', `${n(drop)} ÷ ${n(v.seedsLb)}`, `${n(lbAc, 1)} lb/ac`, !v.unitSize),
-      ];
+      );
       const results = [
         { label: 'Seeding rate', value: lbAc, dim: 'massRate', primary: true },
-        { label: 'Seeds to plant', value: drop, dim: 'countRate' },
+        { label: 'Seeds to plant', value: drop, dim: 'countRate', units: { us: 'pft2', metric: 'pm2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'] },
         { label: 'Bushels per acre', value: buAc, unit: 'bu/ac', decimals: 2 },
       ];
       if (v.unitSize) {
@@ -57,11 +62,11 @@ export default [
     category: 'seeding',
     desc: 'Plants per acre from stand counts in a length of row.',
     fields: [
-      { name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 30, defMetric: 76 },
-      { name: 'len', label: 'Length of row counted', sym: 'L', dim: 'length', unitSet: ['ft', 'in', 'm', 'cm'], def: 17.42, defMetric: 5.3, help: '17 ft 5 in = 1/1000 ac in 30" rows' },
-      { name: 'plants', label: 'Plants counted (total)', sym: 'P', unit: 'plants', def: 34, help: 'Tip: type 34+32+35 to add several counts' },
+      { name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 30, defMetric: 76, defSk: 10 },
+      { name: 'len', label: 'Length of row counted', sym: 'L', dim: 'length', unitSet: ['ft', 'in', 'm', 'cm'], def: 17.42, defMetric: 5.3, defSk: 3, help: 'e.g. 3 ft of row; in 10" rows that is 2.5 ft²' },
+      { name: 'plants', label: 'Plants counted (total)', sym: 'P', unit: 'plants', def: 34, defSk: 62, help: 'Tip: type 34+32+35 to add several counts' },
       { name: 'counts', label: 'Number of counts', sym: 'N', unit: '', def: 1 },
-      { name: 'target', label: 'Target population', sym: 'T', dim: 'countRate', def: 34000, optional: true },
+      { name: 'target', label: 'Target population', sym: 'T', dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], def: 34000, defSk: 25, optional: true },
     ],
     compute(v) {
       const areaFt2 = v.len * v.rw;
@@ -69,7 +74,7 @@ export default [
       const avg = v.plants / v.counts;
       const pop = avg * 43560 / areaFt2;
       const results = [
-        { label: 'Population', value: pop, dim: 'countRate', primary: true },
+        { label: 'Population', value: pop, dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], primary: true },
         { label: 'Average per count', value: avg, unit: 'plants', decimals: 1 },
         { label: 'Plant spacing', value: v.len / avg, dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'] },
       ];

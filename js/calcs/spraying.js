@@ -9,12 +9,17 @@ const RATE_CHOICES = [
   { value: 'galac', label: 'gal/ac', amt: 'gal', kind: 'liq' },
   { value: 'ozac', label: 'oz/ac (dry)', amt: 'oz', kind: 'dry' },
   { value: 'lbac', label: 'lb/ac', amt: 'lb', kind: 'dry' },
+  // Canadian labels (Sask units): metric amounts per acre
+  { value: 'mLac', label: 'mL/ac', amt: 'mL', kind: 'liq', sk: true },
+  { value: 'Lac', label: 'L/ac', amt: 'L', kind: 'liq', sk: true },
+  { value: 'gac', label: 'g/ac', amt: 'g', kind: 'dry', sk: true },
+  { value: 'kgac', label: 'kg/ac', amt: 'kg', kind: 'dry', sk: true },
   { value: 'mLha', label: 'mL/ha', amt: 'mL', kind: 'liq', ha: true },
   { value: 'Lha', label: 'L/ha', amt: 'L', kind: 'liq', ha: true },
   { value: 'gha', label: 'g/ha', amt: 'g', kind: 'dry', ha: true },
   { value: 'kgha', label: 'kg/ha', amt: 'kg', kind: 'dry', ha: true },
 ];
-const RATE_DEFAULT = { us: 'flozac', metric: 'Lha' };
+const RATE_DEFAULT = { us: 'flozac', metric: 'Lha', sk: 'Lac' };
 
 // Express an amount in a friendlier larger unit when it gets big
 function friendly(x, amt) {
@@ -26,7 +31,7 @@ function friendly(x, amt) {
 
 const product = (i, def) => ({
   name: `p${i}`, label: `Product ${String.fromCharCode(64 + i)} rate`, sym: String.fromCharCode(64 + i),
-  choices: RATE_CHOICES, choiceDefault: RATE_DEFAULT, def, optional: i > 1,
+  choices: RATE_CHOICES, choiceDefault: RATE_DEFAULT, def, defs: def ? { flozac: def, Lac: 0.5, Lha: 1.2 } : undefined, optional: i > 1,
 });
 
 export default [
@@ -38,8 +43,8 @@ export default [
     fields: [
       { name: 'mode', label: 'Solve for', type: 'select', def: 'gpa', options: [{ value: 'gpa', label: 'Application rate (GPA)' }, { value: 'gpm', label: 'Nozzle flow needed' }] },
       { name: 'gpm', label: 'Nozzle flow', sym: 'Q', dim: 'flow', def: 0.3, defMetric: 1.2, show: v => v.mode === 'gpa', help: 'Catch for 1 minute: fl oz ÷ 128 = gal/min' },
-      { name: 'gpa', label: 'Target rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, show: v => v.mode === 'gpm' },
-      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 10, defMetric: 16 },
+      { name: 'gpa', label: 'Target rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40, show: v => v.mode === 'gpm' },
+      { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 10, defMetric: 16, defSk: 20 },
       { name: 'spacing', label: 'Nozzle spacing', sym: 'W', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 20, defMetric: 50 },
     ],
     compute(v) {
@@ -74,10 +79,23 @@ export default [
     summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
+    // Reference card shown under the results: the standard W-A-L-E-S mixing order.
+    info: {
+      title: 'Mixing order (W-A-L-E-S)',
+      intro: 'Start with a clean tank. Fill it ½ to ¾ with water and start the agitator. Add a water conditioner (e.g. AMS) first if a label calls for it. Then add products in this order, letting each one mix in before the next:',
+      steps: [
+        ['W', 'Wettable powders & dry granules', 'WP, WG, WDG, DF. Pre-mix in water first if the label says to.'],
+        ['A', 'Agitate', 'Keep agitating until the dry products are fully dispersed, and keep it running for the rest of the fill.'],
+        ['L', 'Liquid flowables & suspensions', 'F, SC, CS, SE.'],
+        ['E', 'Emulsifiable concentrates', 'EC, EW, ME.'],
+        ['S', 'Solutions & surfactants', 'SL, SN and other solutions, then surfactants, oils and other adjuvants last.'],
+      ],
+      outro: 'Top up with water to the full volume while agitating, and spray soon after mixing. Product labels come first: if a label gives a different order, follow the label. Try a jar test before mixing a new combination.',
+    },
     desc: 'Acres per tank and how much of each product goes in the tank.',
     fields: [
-      { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000 },
-      { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140 },
+      { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000, defSk: 4500 },
+      { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40 },
       product(1, 32), product(2, null), product(3, null),
       { name: 'acres', label: 'Field size', sym: 'F', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
@@ -109,7 +127,7 @@ export default [
         if (partAc > 0.01) results.push({ label: 'Last partial load', value: partAc * v.gpa, dim: 'volume' });
         work.push(step('Loads', 'F ÷ ac/tank', `${n(v.acres)} ÷ ${n(acTank)}`, `${n(tanks, 2)} tanks`, true));
       }
-      return { results, work, notes: ['Fill the tank half full with water before adding products, in label order.'] };
+      return { results, work, notes: ['Add products in mixing order. See the card below.'] };
     },
   },
 ];

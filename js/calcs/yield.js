@@ -1,6 +1,6 @@
 import { n, step, fail } from './_h.js';
 
-const rowWidth = def => ({ name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def, defMetric: Math.round(def * 2.54) });
+const rowWidth = def => ({ name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def, defMetric: Math.round(def * 2.54), defSk: 10 });   // prairie drills ≈ 10"
 const FT_M = ['ft', 'm'];
 
 // 1 lb = 453.592 g, so seeds per lb = 453,592 ÷ thousand-seed weight (g)

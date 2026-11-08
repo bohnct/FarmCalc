@@ -2,6 +2,15 @@ import { n, step, deg, fail, CONST } from './_h.js';
 
 const crop = { name: 'crop', label: 'Crop', type: 'crop' };
 const BU_PER_FT3 = CONST.BU_PER_FT3;   // 0.8036
+
+// How manufacturers rate bin capacity (from their spec sheets):
+//   Westeel: grain peaked at 30°, 5% compaction in the cylinder, 1.244 ft³/bu
+//   Sukup:   grain peaked at 28°, 6% compaction (ASABE S413.1)
+// Check: Westeel 2406 Wide-Corr (24 ft, 6 × 44" rings) is listed at 9,220 bu; this gives 9,240.
+const RATING = {
+  westeel: { angle: 30, pack: 5, name: 'Westeel rating' },
+  sukup: { angle: 28, pack: 6, name: 'Sukup rating' },
+};
 const GAL_PER_FT3 = 7.48051948;
 
 export default [
@@ -22,28 +31,42 @@ export default [
       {
         name: 'ringH', label: 'Ring height', type: 'select', def: '44', show: (v, u) => u.h === 'ring', options: [
           { value: '44', label: '44″ (Westeel Wide-Corr, Sukup, most current bins)', short: '44″' },
-          { value: '32', label: '32″ (older bins)', short: '32″' },
-          { value: '30', label: '30″ (older Westeel)', short: '30″' },
+          { value: '32', label: '32″ (older narrow-corrugation bins, e.g. older GSI)', short: '32″' },
+          { value: '30', label: '30″ (older Westeel, e.g. Westeel-Rosco 1406)', short: '30″' },
           { value: 'custom', label: 'Custom…' },
         ],
       },
       { name: 'ringCustom', label: 'Custom ring height', sym: 'Rh', unit: 'in', def: 39, show: (v, u) => u.h === 'ring' && v.ringH === 'custom' },
+      // Rated capacity (like the manufacturer's spec sheet) or the grain as it actually sits.
+      // Entries made before this option existed reopen "as measured" so their numbers don't change.
       {
-        name: 'top', label: 'Top of grain', type: 'select', def: 'level', options: [
+        name: 'basis', label: 'Capacity basis', type: 'select', def: 'westeel', legacy: 'measured', options: [
+          { value: 'westeel', label: 'Westeel rating (peaked 30°, 5% packed)', short: 'Westeel rating' },
+          { value: 'sukup', label: 'Sukup rating (peaked 28°, 6% packed)', short: 'Sukup rating' },
+          { value: 'measured', label: 'As measured (your own top & packing)', short: 'As measured' },
+        ],
+      },
+      {
+        name: 'top', label: 'Top of grain', type: 'select', def: 'level', show: v => v.basis === 'measured', options: [
           { value: 'level', label: 'Leveled' }, { value: 'peak', label: 'Peaked' }, { value: 'funnel', label: 'Inverted cone' },
         ],
       },
       {
-        name: 'repose', label: 'Angle of repose', sym: 'θ', unit: '°', def: 23, cropDefault: 'repose', show: v => v.top !== 'level',
+        name: 'repose', label: 'Angle of repose', sym: 'θ', unit: '°', def: 23, cropDefault: 'repose', show: v => v.basis === 'measured' && v.top !== 'level',
         help: v => (v.top === 'funnel' ? 'Slope of the funnel left after unloading from the center' : 'Slope of the peak when filled from the center'),
       },
       { name: 'bottom', label: 'Bottom', type: 'select', def: 'flat', options: [{ value: 'flat', label: 'Flat floor' }, { value: 'hopper', label: 'Hopper cone' }] },
       { name: 'hopper', label: 'Hopper slope', sym: 'α', unit: '°', def: 45, show: v => v.bottom === 'hopper' },
-      { name: 'pack', label: 'Packing', sym: 'k', unit: '%', def: 0, optional: true, help: 'Grain settles ~3–8% in a full bin; 0 = loose fill' },
+      { name: 'pack', label: 'Packing', sym: 'k', unit: '%', def: 0, optional: true, show: v => v.basis === 'measured', help: 'Grain settles ~3–8% in a full bin (applied to the walls); 0 = loose fill' },
     ],
     compute(v, ctx) {
       const D = v.dia, H = v.h, r = D / 2;
       if (D <= 0) return fail('Enter a bin diameter.');
+      // a manufacturer rating fixes the peak angle and packing; "as measured" uses yours
+      const R = RATING[v.basis];
+      const top = R ? 'peak' : v.top;
+      const theta = R ? R.angle : v.repose;
+      const packPct = R ? R.pack : (v.pack || 0);
       const base = Math.PI * r * r;
       const cyl = base * H;
       let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
@@ -56,14 +79,14 @@ export default [
         step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
         step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
       );
-      if (v.top === 'peak') {
-        peakH = r * Math.tan(deg(v.repose));
+      if (top === 'peak') {
+        peakH = r * Math.tan(deg(theta));
         peak = base * peakH / 3;
-        work.push(step('Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
+        work.push(step(R ? `Peak cone (${n(theta)}°)` : 'Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
       }
-      if (v.top === 'funnel') {
+      if (top === 'funnel') {
         // grain pulled from the center leaves an upside-down cone: subtract it
-        funH = r * Math.tan(deg(v.repose));
+        funH = r * Math.tan(deg(theta));
         if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
         funnel = base * funH / 3;
         work.push(step('Funnel (inverted cone)', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(funH)} ÷ 3`, `${n(funnel)} ft³`));
@@ -73,30 +96,34 @@ export default [
         hop = base * hopH / 3;
         work.push(step('Hopper cone', 'area × (r × tan α) ÷ 3', `${n(base)} × ${n(hopH)} ÷ 3`, `${n(hop)} ft³`));
       }
-      const ft3 = cyl + peak + hop - funnel;
-      const packF = 1 + (v.pack || 0) / 100;
-      const bu = ft3 * BU_PER_FT3 * packF;
+      const ft3 = cyl + peak + hop - funnel;          // physical volume
+      // packing (compaction) settles the grain in the walls; manufacturers apply it to the cylinder only
+      const packF = 1 + packPct / 100;
+      const cylP = cyl * packF;
+      if (packF > 1) work.push(step(R ? `Packed walls (${n(packPct)}%)` : 'Packed walls', 'cyl × (1 + k)', `${n(cyl)} × ${n(packF, 3)}`, `${n(cylP)} ft³`));
+      const eq = cylP + peak + hop - funnel;          // grain-equivalent volume
+      const bu = eq * BU_PER_FT3;
       // "cyl + peak + hopper − funnel", written out with whichever parts apply
-      const parts = [['cyl', cyl, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
+      const parts = [[packF > 1 ? 'packed' : 'cyl', cylP, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
       if (parts.length > 1) {
         const f = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + p[0]).join('');
         const s = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + n(p[1])).join('');
-        work.push(step('Total volume', f, s, `${n(ft3)} ft³`));
+        work.push(step('Total', f, s, `${n(eq)} ft³`));
       }
-      work.push(step('Bushels', packF > 1 ? 'ft³ × 0.8036 × (1 + k)' : 'ft³ × 0.8036', packF > 1 ? `${n(ft3)} × 0.8036 × ${n(packF, 3)}` : `${n(ft3)} × 0.8036`, `${n(bu)} bu`, true));
+      work.push(step('Bushels', 'ft³ × 0.8036', `${n(eq)} × 0.8036`, `${n(bu)} bu`, true));
       return {
         results: [
           { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
+          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
           ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
           ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * packF * ctx.tw, dim: 'grain' }] : []),
+          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * ctx.tw, dim: 'grain' }] : []),
           ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
           { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
         ],
         work,
-        notes: ['1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
+        notes: [R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
         links: [{ calc: 'grain-drying', label: 'Grain drying', values: { crop: v.crop, wet: bu * ctx.tw } }],
       };
     },
@@ -147,7 +174,7 @@ export default [
         results: [
           { label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
           { label: 'Pile height', value: h, dim: 'length', unitSet: ['ft', 'm'] },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
+          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
         ],
         work,

@@ -38,6 +38,18 @@ export function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
+  // optional reference card (e.g. Tank Mix: mixing order); open unless folded away before
+  let infoEl = null;
+  if (def.info) {
+    const I = def.info;
+    infoEl = h('details.info-card', { open: prefs.get('info.' + id, true) },
+      h('summary', icon('note'), h('span', I.title), icon('chevR', 'ic-chev')),
+      I.intro ? h('p.info-intro', I.intro) : null,
+      h('ol.info-steps', I.steps.map(([key, head, detail]) => h('li',
+        h('span.info-key', key), h('div', h('b', head), detail ? h('small', detail) : null)))),
+      I.outro ? h('p.info-outro', I.outro) : null);
+    infoEl.addEventListener('toggle', () => prefs.set('info.' + id, infoEl.open));
+  }
   // Opened from a notebook entry's "Edit inputs" (?edit=<pageId>~<cardId>):
   // the main button rewrites that entry instead of adding a new one.
   const [editPageId, editCardId] = (query.get('edit') || '').split('~');
@@ -268,6 +280,7 @@ export function renderCalc(view, id, query) {
     fieldsEl,
     resultsEl,
     h('div.actions', addBtn, addNewBtn),
+    infoEl,
     workEl,
     linksEl,
   ].filter(Boolean));

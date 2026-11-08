@@ -84,6 +84,7 @@ export const DIMS = {
     units: {
       flozac: { label: 'fl oz/ac', f: 1 / 128 }, ptac: { label: 'pt/ac', f: 1 / 8 }, qtac: { label: 'qt/ac', f: 1 / 4 },
       galac: { label: 'gal/ac', f: 1 },
+      mLac: { label: 'mL/ac', f: GAL_PER_L / 1000 }, Lac: { label: 'L/ac', f: GAL_PER_L },   // Canadian labels: per acre, metric volume
       mLha: { label: 'mL/ha', f: GAL_PER_L / 1000 / AC_PER_HA }, Lha: { label: 'L/ha', f: GAL_PER_L / AC_PER_HA },
     },
   },
@@ -147,8 +148,8 @@ export const PRACTICAL = {
   temperature: ['F', 'C'],
   flow: ['gpm', 'lpm'],
   massRate: ['lbac', 'kgha'],
-  volRate: ['galac', 'Lha'],
-  countRate: ['pac', 'pha'],
+  volRate: ['galac', 'Lac', 'Lha'],
+  countRate: ['pac', 'pft2', 'pha', 'pm2'],
   moneyArea: ['dac', 'dha'],
   areaRate: ['ach', 'hah'],
   grain: ['bu', 'lb', 'ton', 't'],
@@ -163,7 +164,30 @@ export function practicalUnits(dim, unitSet, current) {
   return list;
 }
 
+// Saskatchewan / prairie units: imperial where that's how it's done here (acres,
+// bushels, lb/ac, feet & inches, seeds per ft², $/bu) and metric where that's
+// how it's done here (kg scale tickets & tonnes, km/h, litres, L/ac on labels, °C).
+// Each quantity follows the US side, the metric side, or names its own unit.
+export const SK = {
+  length: 'us', area: 'us', volume: 'metric', mass: 'metric', speed: 'metric', pressure: 'us',
+  temperature: 'metric', flow: 'us', massRate: 'us', volRate: 'Lac', countRate: 'us', moneyArea: 'us',
+  areaRate: 'us', grain: 'us', grainYield: 'us', grainPrice: 'us',
+};
+
+/** For field defaults: does this quantity follow the US or the metric side in this system? */
+export function sideFor(dim, system) {
+  if (system !== 'sk') return system;
+  const s = SK[dim] || 'us';
+  return s === 'metric' ? 'metric' : 'us';
+}
+
 export function defaultUnit(dim, system, override) {
+  if (system === 'sk') {
+    if (override && override.sk) return override.sk;
+    const s = SK[dim] || 'us';
+    if (s !== 'us' && s !== 'metric') return s;          // a named unit, e.g. L/ac
+    return defaultUnit(dim, s, override);
+  }
   if (override && override[system]) return override[system];
   return (PREF[dim] && PREF[dim][system]) || DIMS[dim].base;
 }
@@ -236,7 +260,7 @@ export const UNIT_NAMES = {
   tha: 'tonnes / hectare', qha: 'quintals / hectare', dbu: 'per bushel', dcwt: 'per cwt', dton: 'per short ton', dt: 'per tonne',
   ac: 'acres', ha: 'hectares', ft2: 'square feet', m2: 'square metres', gal: 'US gallons', L: 'litres', ft3: 'cubic feet', m3: 'cubic metres',
   ft: 'feet', m: 'metres', in: 'inches', cm: 'centimetres', yd: 'yards', mi: 'miles', km: 'kilometres', ring: 'bin rings',
-  galac: 'gallons / acre', Lha: 'litres / hectare', mph: 'miles / hour', kmh: 'km / hour', pac: 'per acre', pha: 'per hectare',
+  galac: 'gallons / acre', Lac: 'litres / acre', mLac: 'mL / acre', Lha: 'litres / hectare', mph: 'miles / hour', kmh: 'km / hour', pac: 'per acre', pha: 'per hectare',
   ach: 'acres / hour', hah: 'hectares / hour', dac: 'per acre', dha: 'per hectare', psi: 'psi', kPa: 'kilopascals', F: 'Fahrenheit', C: 'Celsius',
 };
 

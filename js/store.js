@@ -5,7 +5,7 @@ import { setDecimals } from './format.js';
 // ---------- Settings ----------
 const SETTINGS_KEY = 'farmcalc.settings';
 const DEFAULT_SETTINGS = {
-  system: 'us',          // 'us' | 'metric'
+  system: 'sk',          // 'sk' (Saskatchewan / prairie mix) | 'us' | 'metric'
   crop: 'wheat',         // default crop for every calculator (Settings → Default crop)
   decimals: 'auto',      // 'auto' | '0'..'4'
   currency: '$',
@@ -24,6 +24,17 @@ setDecimals(settings.decimals);
 // One-time switch from the old corn default to wheat. Calculators whose last
 // inputs were left on corn start fresh, so they open with wheat values
 // (test weight, moisture, yield...). Runs once; picking corn again later sticks.
+// One-time switch of the old US default to the new Sask units (calculators reopen
+// with Sask starting values; saved inputs belong to the old system so they're skipped).
+(function switchToSaskUnits() {
+  const FLAG = 'farmcalc.migrated.saskUnits';
+  if (lsGet(FLAG)) return;
+  lsSet(FLAG, '1');
+  if (settings.system !== 'us') return;
+  settings.system = 'sk';
+  lsSet(SETTINGS_KEY, JSON.stringify(settings));
+})();
+
 (function switchDefaultCropToWheat() {
   const FLAG = 'farmcalc.migrated.wheatDefault';
   if (lsGet(FLAG)) return;
