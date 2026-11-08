@@ -2,9 +2,10 @@
 // on top for pen, highlighter, straight lines/arrows and a stroke eraser.
 import { h, icon, toast, openSheet, promptSheet, confirmSheet } from '../ui.js';
 import { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } from '../store.js';
-import { renderSteps } from '../steps.js';
+import { renderSteps, renderSummary } from '../steps.js';
 import { getCalc } from '../registry.js';
 import { fmtDate } from '../format.js';
+import { inkColor } from '../theme.js';
 
 const PEN_COLORS = ['#ffffff', '#ff7a00', '#ff4d4d', '#ffd400', '#3ddc84', '#4da3ff'];
 const HL_COLORS = ['#ffe14d', '#ff7a00', '#3ddc84', '#ff5fa2', '#4da3ff'];
@@ -49,7 +50,7 @@ export async function renderNotebook(view, query) {
   const pageNoEl = h('div.ph-sub');
   const dateEl = h('span.ph-date-val');
   const heading = h('button.nb-head', { type: 'button', 'aria-label': 'Page heading: tap to rename or switch pages', on: { click: pageSheet } },
-    h('div.ph-left', h('div.ph-title', nameEl, h('span.ph-caret', icon('chev'))), pageNoEl),
+    h('div.ph-left', h('div.ph-title', h('div.ph-name-row', nameEl, h('span.ph-caret', icon('chev')))), pageNoEl),
     h('div.ph-date', h('span.ph-date-label', 'Date'), dateEl));
   const paper = h('div.nb-paper', { style: { width: PAGE_W + 'px', height: PAGE_H + 'px' } },
     h('div.nb-rules'),
@@ -70,8 +71,9 @@ export async function renderNotebook(view, query) {
       h('button.icon-btn', { 'aria-label': 'Calculation history', title: 'History', on: { click: historySheet } }, icon('history')),
       h('button.icon-btn', { 'aria-label': 'Export page as image', title: 'Export image', on: { click: exportPng } }, icon('share'))),
     h('div.nb-zoom',
-      h('button', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
-      h('button', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
+      // +/− only show with a mouse; on a phone you pinch to zoom (see CSS)
+      h('button.zbtn', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
+      h('button.zbtn', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
       h('button', { 'aria-label': 'Fit content', on: { click: fitContent } }, icon('fit'))),
     emptyEl, toolsEl);
   view.append(nb);
@@ -206,14 +208,16 @@ export async function renderNotebook(view, query) {
           h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
           h('button', { 'aria-label': 'Edit text', on: { click: () => editText(c) } }, icon('edit')),
           h('button', { 'aria-label': 'Text options', on: { click: () => cardMenu(c) } }, icon('more'))),
-        h('div.ncard-text', { style: { color: c.color || '#fff', fontSize: (c.size || 26) + 'px' } }, c.text));
+        h('div.ncard-text', { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
     }
     const el = h('div.ncard' + (c.collapsed ? '.collapsed' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
       h('div.ncard-head',
         h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
         h('button', { 'aria-label': c.collapsed ? 'Expand' : 'Collapse', on: { click: () => { c.collapsed = !c.collapsed; saveNotebook(); renderCards(); requestDraw(); } } }, icon(c.collapsed ? 'expand' : 'collapse')),
         h('button', { 'aria-label': 'Card options', on: { click: () => cardMenu(c) } }, icon('more'))),
-      h('div.ncard-body', renderSteps(c)),
+      h('div.ncard-body', c.style === 'summary'
+        ? renderSummary(c, { showWork: !!c.showWork, onToggleWork: () => { c.showWork = !c.showWork; saveNotebook(); renderCards(); requestDraw(); } })
+        : renderSteps(c)),
       c.note ? h('div.ncard-note', c.note) : null);
     return el;
   }
@@ -267,7 +271,7 @@ export async function renderNotebook(view, query) {
       h('div.seg', TEXT_SIZES.map(([name, w]) => h('button' + ((c.size || 26) === w ? '.on' : ''), { type: 'button', on: { click: () => restyle({ size: w }) } }, name))),
       h('div.ts-label', 'Color'),
       h('div.ts-swatches', PEN_COLORS.map(col => h('button.sw' + ((c.color || '#ffffff') === col ? '.on' : ''), {
-        type: 'button', 'aria-label': `Color ${col}`, style: { background: col }, on: { click: () => restyle({ color: col }) },
+        type: 'button', 'aria-label': `Color ${col}`, style: { background: inkColor(col) }, on: { click: () => restyle({ color: col }) },
       }))));
     draw();
     return wrap;
@@ -559,6 +563,9 @@ export async function renderNotebook(view, query) {
   const stopGesture = e => e.preventDefault();
   document.addEventListener('gesturestart', stopGesture);
   window.addEventListener('resize', resize);
+  // switching Day/Night repaints ink and text notes in the right colors
+  const onTheme = () => { renderCards(); requestDraw(); buildTools(); };
+  window.addEventListener('themechange', onTheme);
 
   // ---------- undo / redo ----------
   function apply(a, reverse) {
@@ -594,20 +601,28 @@ export async function renderNotebook(view, query) {
     ['line', 'line', 'Line'], ['text', 'text', 'Text'], ['eraser', 'eraser', 'Eraser'],
   ];
   let undoBtn, redoBtn;
+  // The toolbar can fold down to just the active tool + an expand button, to free up the page.
+  let toolsFolded = prefs.get('toolsFolded', false);
   function buildTools() {
     toolsEl.replaceChildren();
+    toolsEl.classList.toggle('folded', toolsFolded);
+    const foldBtn = h('button.fold', {
+      'aria-label': toolsFolded ? 'Show all tools' : 'Hide tools', title: toolsFolded ? 'Show all tools' : 'Hide tools',
+      on: { click: () => { toolsFolded = !toolsFolded; prefs.set('toolsFolded', toolsFolded); closePop(); buildTools(); } },
+    }, icon(toolsFolded ? 'expandTools' : 'foldTools'));
     for (const [id, ic, label] of TOOLS) {
       const on = tool === id;
+      if (toolsFolded && !on) continue;
       toolsEl.append(h('button' + (on ? '.on' : ''), {
         'aria-label': on && toolOpts[id] ? `${label} (tap again for color & size)` : label,
         title: on && toolOpts[id] ? `${label}: tap again for color & size` : label, 'aria-pressed': String(on),
         on: { click: () => { if (tool === id && toolOpts[id]) togglePop(); else setTool(id); } },
       }, icon(ic), on && toolOpts[id] ? h('i.tdot') : null));
     }
-    toolsEl.append(h('span.sep'));
     undoBtn = h('button', { 'aria-label': 'Undo', title: 'Undo', on: { click: doUndo } }, icon('undo'));
     redoBtn = h('button', { 'aria-label': 'Redo', title: 'Redo', on: { click: doRedo } }, icon('redo'));
-    toolsEl.append(undoBtn, redoBtn);
+    if (toolsFolded) toolsEl.append(undoBtn, foldBtn);
+    else toolsEl.append(h('span.sep'), undoBtn, redoBtn, foldBtn);
     syncTools();
   }
   function syncTools() {
@@ -628,7 +643,7 @@ export async function renderNotebook(view, query) {
     const build = () => {
       popEl.replaceChildren(
         h('div.tp-label', 'Color'),
-        h('div.tp-row', colors.map(c => h('button.sw' + (o.color === c ? '.on' : ''), { style: { background: c }, 'aria-label': c, on: { click: () => { o.color = c; save(); build(); } } }))),
+        h('div.tp-row', colors.map(c => h('button.sw' + (o.color === c ? '.on' : ''), { style: { background: inkColor(c) }, 'aria-label': c, on: { click: () => { o.color = c; save(); build(); } } }))),
         h('div.tp-label', tool === 'text' ? 'Size' : 'Thickness'),
         tool === 'text'
           ? h('div.seg.size-seg', TEXT_SIZES.map(([name, w]) => h('button' + (o.width === w ? '.on' : ''), { type: 'button', on: { click: () => { o.width = w; save(); build(); } } }, name)))
@@ -748,6 +763,7 @@ export async function renderNotebook(view, query) {
   cleanup = () => {
     document.removeEventListener('gesturestart', stopGesture);
     window.removeEventListener('resize', resize);
+    window.removeEventListener('themechange', onTheme);
     saveNotebook(true);
   };
   return cleanup;
@@ -765,7 +781,7 @@ function drawStroke(g, s) {
   if (!p || p.length < 2) return;
   g.save();
   g.lineCap = 'round'; g.lineJoin = 'round';
-  g.strokeStyle = s.color; g.fillStyle = s.color;
+  g.strokeStyle = g.fillStyle = inkColor(s.color);   // white ink shows dark on Day paper
   if (s.tool === 'hl') { g.globalAlpha = 0.38; g.lineCap = 'butt'; }
   if (s.tool === 'line') {
     g.lineWidth = s.width;
@@ -904,33 +920,36 @@ function drawCardToCanvas(g, el, c, viewScale) {
 }
 /** Paint the paper (rules, margin, holes, heading) onto the export canvas, matching the CSS. */
 function drawPaper(g, W, H, style, page, headingEl) {
-  g.fillStyle = '#0b0b0b'; g.fillRect(0, 0, W, H);
+  // read the current theme's paper colors so the image matches the screen
+  const css = getComputedStyle(document.documentElement);
+  const tok = name => css.getPropertyValue(name).trim();
+  g.fillStyle = tok('--paper'); g.fillRect(0, 0, W, H);
   g.save();
   g.lineWidth = 1;
   if (style === 'lines') {
-    g.strokeStyle = 'rgba(77,163,255,.24)';
+    g.strokeStyle = tok('--rule');
     for (let y = HEAD_H + 36; y < H; y += 36) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(W, y + 0.5); g.stroke(); }
-    g.strokeStyle = 'rgba(255,90,90,.45)';
+    g.strokeStyle = tok('--margin-line');
     g.beginPath(); g.moveTo(MARGIN_X + 0.5, 0); g.lineTo(MARGIN_X + 0.5, H); g.stroke();
     for (const f of [0.18, 0.5, 0.82]) {
       const cy = PAGE_H * f; if (cy > H) continue;
-      g.fillStyle = '#050505'; g.beginPath(); g.arc(46, cy, 17, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = '#1f1f1f'; g.stroke();
+      g.fillStyle = tok('--desk'); g.beginPath(); g.arc(46, cy, 17, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = tok('--paper-edge'); g.stroke();
     }
   } else if (style === 'grid') {
-    g.strokeStyle = 'rgba(255,255,255,.055)';
+    g.strokeStyle = tok('--grid');
     for (let y = HEAD_H; y < H; y += 32) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(W, y + 0.5); g.stroke(); }
     for (let x = 0; x < W; x += 32) { g.beginPath(); g.moveTo(x + 0.5, HEAD_H); g.lineTo(x + 0.5, H); g.stroke(); }
   }
-  // heading: copy the laid-out text of the on-screen heading
+  // heading: page name and date
   const left = style === 'lines' ? MARGIN_X + 22 : 40;
-  g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 2;
+  g.strokeStyle = tok('--head-rule'); g.lineWidth = 2;
   g.beginPath(); g.moveTo(0, HEAD_H - 4); g.lineTo(W, HEAD_H - 4); g.stroke();
   g.lineWidth = 1; g.beginPath(); g.moveTo(0, HEAD_H); g.lineTo(W, HEAD_H); g.stroke();
   const font = getComputedStyle(headingEl.querySelector('.ph-name')).fontFamily;
-  g.fillStyle = '#fff'; g.font = `700 54px ${font}`; g.textBaseline = 'alphabetic';
+  g.fillStyle = tok('--ink-strong'); g.font = `700 54px ${font}`; g.textBaseline = 'alphabetic';
   g.fillText(page.name, left, 88, W - left - 260);
-  g.fillStyle = '#ff9a3d'; g.font = `500 26px ${font}`;
+  g.fillStyle = tok('--accent-2'); g.font = `500 26px ${font}`;
   g.fillText(new Date(page.created || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), Math.max(left + 300, W - 230), 88);
   g.restore();
 }

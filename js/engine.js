@@ -14,7 +14,11 @@ export function makeCtx(def, state, settings) {
   let tw = crop.tw;
   const twField = def.fields.find(f => f.name === 'tw');
   if (twField) { const t = parseNum(state.values.tw); if (t > 0) tw = t; }
-  return { cropId, crop, tw, cur: settings.currency || '$', system: settings.system };
+  // bin ring height (inches) for the "rings" length unit
+  let ringIn = 44;
+  if (state.values.ringH === 'custom') { const c = parseNum(state.values.ringCustom); if (c > 0) ringIn = c; }
+  else if (state.values.ringH) ringIn = Number(state.values.ringH) || 44;
+  return { cropId, crop, tw, ringIn, cur: settings.currency || '$', system: settings.system };
 }
 
 export function selectOptions(f, v, ctx) {
@@ -22,7 +26,8 @@ export function selectOptions(f, v, ctx) {
   return typeof f.options === 'function' ? f.options(v, ctx) : f.options;
 }
 
-export function isShown(f, values) { return !f.show || f.show(values); }
+// show(values, units): a field can depend on other fields' values or on the unit picked for them
+export function isShown(f, values, units = {}) { return !f.show || f.show(values, units); }
 
 /** Unit id to show for a number field (dim units or choice list) */
 export function initialUnit(f, system) {
@@ -150,7 +155,7 @@ export function parseState(def, state, settings) {
   }
   for (const f of def.fields) {
     if (fieldType(f) !== 'number') continue;
-    const shown = isShown(f, state.values);
+    const shown = isShown(f, state.values, state.units);
     const text = state.values[f.name];
     const num = parseNum(text);
     if (!shown) { v[f.name] = null; continue; }
@@ -162,7 +167,7 @@ export function parseState(def, state, settings) {
     }
     if (f.dim) v[f.name] = toBase(f.dim, num, state.units[f.name], ctx);
     else v[f.name] = num;
-    if (f.choices) v[f.name + 'Unit'] = state.units[f.name];
+    if (f.choices || f.dim) v[f.name + 'Unit'] = state.units[f.name];
   }
   return { v, ctx, missing, bad };
 }
@@ -199,13 +204,16 @@ export function formatResult(r, ctx, unitOverride) {
  */
 export function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
   const { v, ctx, out } = result;
+  // pick === 'summary': a summary card (inputs → answer) that keeps the full working folded away
+  const summary = pick === 'summary';
+  if (summary) pick = null;
   const all = !pick || pick.length >= out.work.length;
   const steps = all ? out.work : out.work.filter((_, i) => pick.includes(i));
   // which input symbols do the chosen steps use? (e.g. "W", "Mi" in "W × (Mi − Mf)")
   const used = sym => !sym || all || steps.some(s => new RegExp(`(^|[^A-Za-z])${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^A-Za-z]|$)`).test(s.f || ''));
   let given = [];
   for (const f of def.fields) {
-    if (!isShown(f, state.values)) continue;
+    if (!isShown(f, state.values, state.units)) continue;
     const t = fieldType(f);
     if (t === 'number') {
       const text = state.values[f.name];
@@ -215,7 +223,8 @@ export function snapshot(def, state, settings, result, resUnits = {}, pick = nul
       given.push({ sym: f.sym || '', label: f.label, text: `${val}${ul ? (ul.startsWith('/') || ul === '%' || ul === '°' ? '' : ' ') + ul : ''}` });
     } else {
       const opt = (selectOptions(f, state.values, ctx) || []).find(o => o.value === state.values[f.name]);
-      given.push({ sym: '', label: f.label, text: opt ? opt.label : String(state.values[f.name]) });
+      // `short` (if a choice has one) keeps long descriptions off the notebook card
+      given.push({ sym: '', label: f.label, text: opt ? (opt.short || opt.label) : String(state.values[f.name]) });
     }
   }
   // for a partial pick, keep only inputs the chosen steps reference (plus the crop)
@@ -236,8 +245,15 @@ export function snapshot(def, state, settings, result, resUnits = {}, pick = nul
       if (f.choices) prefill[f.name + 'Unit'] = state.units[f.name];
     }
   }
+  // Summary cards show the main answer plus a couple of key supporting results:
+  // the calculator's own `summary` list of result labels, else the first other result.
+  if (summary) {
+    const extra = def.summary || out.results.filter(r => !r.primary).slice(0, 1).map(r => r.label);
+    for (const r of results) r.sum = !r.primary && extra.includes(r.label);
+  }
   return {
     calcId: def.id, title: def.title, category: def.category, date: Date.now(),
+    style: summary ? 'summary' : 'steps',
     subtitle: all ? '' : steps.map(s => s.label).join(' · '),
     given, steps: [...steps.slice(0, -1).map(s => ({ ...s, final: false })), lastStep], results, notes: all ? out.notes || [] : [], prefill,
   };

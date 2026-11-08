@@ -4,6 +4,7 @@ const FIELD_LEN = ['ft', 'yd', 'rod', 'mi', 'm', 'km'];
 export default [
   {
     id: 'field-productivity',
+    summary: ['Per day'],   // supporting results on a notebook summary card
     title: 'Field Productivity',
     category: 'fieldops',
     desc: 'Acres per hour from implement width, speed and field efficiency.',
@@ -98,6 +99,7 @@ export default [
 
   {
     id: 'time-to-finish',
+    summary: ['As hours & minutes', 'Working days'],   // supporting results on a notebook summary card
     title: 'Time to Finish',
     category: 'fieldops',
     desc: 'Hours and days left to cover the remaining acres.',

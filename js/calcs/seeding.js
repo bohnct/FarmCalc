@@ -3,6 +3,7 @@ import { n, m, step, fail } from './_h.js';
 export default [
   {
     id: 'seeding-rate',
+    summary: ['Seeds to plant', 'Units per acre'],   // supporting results on a notebook summary card
     title: 'Seeding Rate',
     category: 'seeding',
     desc: 'Seeds per acre to lb/ac, bu/ac and seed units, adjusted for germination.',
@@ -51,6 +52,7 @@ export default [
 
   {
     id: 'plant-population',
+    summary: ['% of target'],   // supporting results on a notebook summary card
     title: 'Plant Population',
     category: 'seeding',
     desc: 'Plants per acre from stand counts in a length of row.',

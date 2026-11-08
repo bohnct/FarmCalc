@@ -4,7 +4,9 @@ import { renderCalc } from './pages/calc.js';
 import { renderNotebook } from './pages/notebook.js';
 import { renderSettings } from './pages/settings.js';
 import { saveNotebook } from './store.js';
+import { applyTheme } from './theme.js';
 
+applyTheme();
 const view = document.getElementById('view');
 const tabs = document.querySelectorAll('#tabbar a');
 const scrollPos = {};

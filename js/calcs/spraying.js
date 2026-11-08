@@ -71,6 +71,7 @@ export default [
 
   {
     id: 'tank-mix',
+    summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
     desc: 'Acres per tank and how much of each product goes in the tank.',

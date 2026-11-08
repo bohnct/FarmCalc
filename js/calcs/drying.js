@@ -108,6 +108,7 @@ export default [
 
   {
     id: 'moisture-shrink',
+    summary: ['Shrink', 'Net check'],   // supporting results on a notebook summary card
     title: 'Moisture Shrink & Discount',
     category: 'drying',
     desc: 'Elevator shrink, drying charges and net value for wet grain.',

@@ -7,13 +7,27 @@ const GAL_PER_FT3 = 7.48051948;
 export default [
   {
     id: 'bin-capacity',
+    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Bin Volume',
     category: 'storage',
     desc: 'Bushels in a round bin: level, peaked and hopper bottom.',
     fields: [
       crop,
       { name: 'dia', label: 'Bin diameter', sym: 'D', dim: 'length', unitSet: ['ft', 'm'], def: 30, defMetric: 9 },
-      { name: 'h', label: 'Grain depth at sidewall', sym: 'H', dim: 'length', unitSet: ['ft', 'm'], def: 20, defMetric: 6 },
+      {
+        name: 'h', label: 'Grain depth at sidewall', sym: 'H', dim: 'length', unitSet: ['ft', 'ring', 'm'], def: 20, defMetric: 6,
+        help: 'Tap the unit to count sidewall rings instead',
+      },
+      // Sidewall sheet ("ring") height. Westeel Wide-Corr and Sukup use 44" sheets; older bins 32" or 30".
+      {
+        name: 'ringH', label: 'Ring height', type: 'select', def: '44', show: (v, u) => u.h === 'ring', options: [
+          { value: '44', label: '44″ (Westeel Wide-Corr, Sukup, most current bins)', short: '44″' },
+          { value: '32', label: '32″ (older bins)', short: '32″' },
+          { value: '30', label: '30″ (older Westeel)', short: '30″' },
+          { value: 'custom', label: 'Custom…' },
+        ],
+      },
+      { name: 'ringCustom', label: 'Custom ring height', sym: 'Rh', unit: 'in', def: 39, show: (v, u) => u.h === 'ring' && v.ringH === 'custom' },
       {
         name: 'top', label: 'Top of grain', type: 'select', def: 'level', options: [
           { value: 'level', label: 'Leveled' }, { value: 'peak', label: 'Peaked' }, { value: 'funnel', label: 'Inverted cone' },
@@ -33,10 +47,15 @@ export default [
       const base = Math.PI * r * r;
       const cyl = base * H;
       let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
-      const work = [
+      const work = [];
+      if (v.hUnit === 'ring') {
+        const rings = H / (ctx.ringIn / 12);
+        work.push(step('Sidewall height', 'rings × ring height', `${n(rings)} × ${n(ctx.ringIn)}″`, `${n(H)} ft`));
+      }
+      work.push(
         step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
         step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
-      ];
+      );
       if (v.top === 'peak') {
         peakH = r * Math.tan(deg(v.repose));
         peak = base * peakH / 3;
@@ -70,6 +89,7 @@ export default [
           { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
           { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
+          ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
           ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
           ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * packF * ctx.tw, dim: 'grain' }] : []),
           ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
@@ -84,6 +104,7 @@ export default [
 
   {
     id: 'grain-pile',
+    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Grain Pile Volume',
     category: 'storage',
     desc: 'Bushels in a cone pile or a long ridge pile on the ground.',
@@ -136,6 +157,7 @@ export default [
 
   {
     id: 'truck-load',
+    summary: ['Net tons'],   // supporting results on a notebook summary card
     title: 'Truck / Wagon Load',
     category: 'storage',
     desc: 'Scale ticket weights to net bushels and tons.',

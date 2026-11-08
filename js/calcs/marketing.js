@@ -3,6 +3,7 @@ import { n, m, step, fail } from './_h.js';
 export default [
   {
     id: 'break-even',
+    summary: ['Break-even yield'],   // supporting results on a notebook summary card
     title: 'Break-even Price',
     category: 'marketing',
     desc: 'Price per bushel to cover costs, and break-even yield at a price.',

@@ -9,6 +9,7 @@ const G_PER_LB = 453.592;
 export default [
   {
     id: 'canola-yield',
+    summary: [],   // supporting results on a notebook summary card
     title: 'Canola Yield Estimate',
     category: 'yield',
     crop: 'canola',
@@ -51,6 +52,7 @@ export default [
 
   {
     id: 'wheat-yield',
+    summary: [],   // supporting results on a notebook summary card
     title: 'Wheat Yield Estimate',
     category: 'yield',
     crop: 'wheat',

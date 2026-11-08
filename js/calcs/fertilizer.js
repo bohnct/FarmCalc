@@ -10,6 +10,7 @@ const N_SOURCES = { urea: { label: 'Urea 46-0-0', n: 46, s: 0 }, ams: { label: '
 export default [
   {
     id: 'fertilizer-blend',
+    summary: ['Blend analysis', 'Cost per acre'],   // supporting results on a notebook summary card
     title: 'Fertilizer Blend',
     category: 'fertilizer',
     desc: 'Pounds of urea/AMS, MAP/DAP and potash to hit an N-P-K target.',
@@ -67,6 +68,7 @@ export default [
 
   {
     id: 'nitrogen-rate',
+    summary: ['Cost per acre'],   // supporting results on a notebook summary card
     title: 'Nitrogen Rate & Cost',
     category: 'fertilizer',
     desc: 'Product rate for a target N rate, cost per pound of N and per acre.',

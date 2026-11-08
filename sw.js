@@ -1,6 +1,6 @@
 // Service worker: caches the app so it works with no signal in the field.
 // Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = 'farmcalc-v7';
+const VERSION = 'farmcalc-v11';
 const FONT_CACHE = 'farmcalc-fonts';
 
 const APP_FILES = [
@@ -42,7 +42,9 @@ self.addEventListener('fetch', e => {
   // cache when offline or when the connection is too slow (weak field signal).
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
-    const net = fetch(e.request).then(res => {
+    // 'no-cache' = always ask the server whether the file changed (cheap when it hasn't),
+    // so an update shows up right away instead of after the browser's HTTP cache expires
+    const net = fetch(e.request, { cache: 'no-cache' }).then(res => {
       if (res.ok) cache.put(e.request, res.clone());
       return res;
     });

@@ -1,4 +1,4 @@
-import { h, icon, toast, openSheet, promptSheet } from '../ui.js';
+import { h, icon, toast, openSheet, promptSheet, choiceControl } from '../ui.js';
 import { getCalc } from '../registry.js';
 import { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage } from '../store.js';
 import {
@@ -18,31 +18,6 @@ function unitToggle(cls, options, current, onChange, aria) {
   }, options[i].label);
 }
 
-/**
- * A choice field in the app's own style: a segmented toggle when there are
- * two or three short options, otherwise a button that opens a picker sheet.
- */
-function choiceControl(id, label, opts, current, onChange) {
-  const cur = opts.find(o => o.value === current) || opts[0];
-  if (opts.length <= 3 && opts.every(o => o.label.length <= 14)) {
-    return h('div.seg.choice-seg', { id, role: 'radiogroup', 'aria-label': label },
-      opts.map(o => h('button' + (o.value === cur?.value ? '.on' : ''), {
-        type: 'button', role: 'radio', 'aria-checked': String(o.value === cur?.value),
-        on: { click: () => { if (o.value !== cur?.value) onChange(o.value); } },
-      }, o.label)));
-  }
-  return h('button.pick-btn', {
-    id, type: 'button', 'aria-label': `${label}: ${cur?.label || ''}`,
-    on: {
-      click: () => openSheet(close => [
-        h('h3', label),
-        ...opts.map(o => h('button.list-item' + (o.value === cur?.value ? '.on' : ''), {
-          on: { click: () => { close(); if (o.value !== cur?.value) onChange(o.value); } },
-        }, h('div.li-main', h('div.li-title', o.label)), o.value === cur?.value ? icon('check') : null)),
-      ]),
-    },
-  }, h('span.pick-label', cur?.label || ''), icon('chev'));
-}
 
 export function renderCalc(view, id, query) {
   const def = getCalc(id);
@@ -72,7 +47,7 @@ export function renderCalc(view, id, query) {
     fieldsEl.replaceChildren();
     const parsed = run(def, state, settings);
     for (const f of def.fields) {
-      if (!isShown(f, state.values)) continue;
+      if (!isShown(f, state.values, state.units)) continue;
       const t = fieldType(f);
       const help = typeof f.help === 'function' ? f.help(parsed.v) : f.help;
       const label = h('label', { for: 'f-' + f.name }, f.label, f.sym ? h('span.sym', f.sym) : null, help ? h('small', help) : null);
@@ -181,7 +156,6 @@ export function renderCalc(view, id, query) {
   function addToNotebook() {
     if (!last?.out || last.out.error) return;
     const work = last.out.work;
-    if (work.length === 1) { choosePage([0]); return; }
     const picked = new Set([work.length - 1]);
     openSheet(close => {
       const list = h('div');
@@ -199,6 +173,12 @@ export function renderCalc(view, id, query) {
       draw();
       return [
         h('h3', `${def.title}: what to add?`),
+        // Summary card: your inputs written out, then the answer (working folded away on the card)
+        h('button.list-item.summary-opt', { type: 'button', on: { click: () => { close(); choosePage('summary'); } } },
+          icon('note'),
+          h('div.li-main', h('div.li-title', 'Summary'), h('div.li-sub', 'Your inputs, then the answer · working tucked away')),
+          icon('chevR')),
+        h('div.sheet-divider', 'or the working, step by step'),
         list,
         h('div.row',
           h('button.btn', { on: { click: () => { work.forEach((_, i) => picked.add(i)); draw(); } } }, 'Select all'),
@@ -217,7 +197,7 @@ export function renderCalc(view, id, query) {
       }, icon('book'), h('div.li-main', h('div.li-title', p.name), h('div.li-sub', `${p.cards.length} calculation${p.cards.length === 1 ? '' : 's'}`)), p.id === notebook.lastPageId ? icon('check') : null));
       return [
         h('h3', 'Add to notebook page'),
-        h('p.sheet-note', snap.subtitle ? `${def.title}: ${snap.subtitle}` : `${def.title}: whole calculation`),
+        h('p.sheet-note', snap.style === 'summary' ? `${def.title}: summary` : snap.subtitle ? `${def.title}: ${snap.subtitle}` : `${def.title}: whole calculation`),
         ...items,
         h('button.list-item', {
           on: {

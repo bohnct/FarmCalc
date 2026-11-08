@@ -62,6 +62,8 @@ export const ICONS = {
   marker: '<path d="M9 14l-4 4v2h4l4-4"/><path d="M9 14l6-10 5 5-10 6z"/><path d="M4 22h16" opacity=".5"/>',
   line: '<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="5" r="1.5"/>',
   text: '<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>',
+  foldTools: '<path d="M14 6l-6 6 6 6"/><path d="M19 6l-6 6 6 6" opacity=".5"/>',
+  expandTools: '<path d="M10 6l6 6-6 6"/><path d="M5 6l6 6-6 6" opacity=".5"/>',
   eraser: '<path d="M8 20h12"/><path d="M4.5 15.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L12 18H7z"/><path d="M9 11l5 5"/>',
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
@@ -85,6 +87,32 @@ export const ICONS = {
 };
 
 export function icon(name, cls) { return svg(ICONS[name] || '', cls); }
+
+/**
+ * A choice field in the app's own style: a segmented toggle when there are
+ * two or three short options, otherwise a button that opens a picker sheet.
+ */
+export function choiceControl(id, label, opts, current, onChange) {
+  const cur = opts.find(o => o.value === current) || opts[0];
+  if (opts.length <= 3 && opts.every(o => o.label.length <= 14)) {
+    return h('div.seg.choice-seg', { id, role: 'radiogroup', 'aria-label': label },
+      opts.map(o => h('button' + (o.value === cur?.value ? '.on' : ''), {
+        type: 'button', role: 'radio', 'aria-checked': String(o.value === cur?.value),
+        on: { click: () => { if (o.value !== cur?.value) onChange(o.value); } },
+      }, o.label)));
+  }
+  return h('button.pick-btn', {
+    id, type: 'button', 'aria-label': `${label}: ${cur?.label || ''}`,
+    on: {
+      click: () => openSheet(close => [
+        h('h3', label),
+        ...opts.map(o => h('button.list-item' + (o.value === cur?.value ? '.on' : ''), {
+          on: { click: () => { close(); if (o.value !== cur?.value) onChange(o.value); } },
+        }, h('div.li-main', h('div.li-title', o.label)), o.value === cur?.value ? icon('check') : null)),
+      ]),
+    },
+  }, h('span.pick-label', cur?.label || ''), icon('chev'));
+}
 
 // ---------- Toast ----------
 let toastTimer;

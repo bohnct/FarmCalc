@@ -103,6 +103,12 @@ test('bin-capacity', () => {
   const f = calc('bin-capacity', { dia: 30, h: 20, top: 'funnel', repose: 23, bottom: 'flat', pack: '' });
   close('inverted cone subtracts the funnel', f.get('Capacity', 'bu'), (ft3 - peak) / 1.244456);
   close('funnel depth', f.get('Funnel depth', 'ft'), 15 * Math.tan(23 * Math.PI / 180));
+  // depth given in 44" rings: 6 rings = 22 ft
+  const rg = calc('bin-capacity', { dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });
+  close('6 × 44″ rings = 22 ft of grain', rg.get('Capacity', 'bu'), Math.PI * 225 * 22 / 1.244456);
+  log(rg.r.out.work[0].label === 'Sidewall height', 'work shows rings converted to feet');
+  const rc = calc('bin-capacity', { dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: 'custom', ringCustom: 39 }, US, { h: 'ring' });
+  close('custom 39″ rings', rc.get('Capacity', 'bu'), Math.PI * 225 * (6 * 39 / 12) / 1.244456);
   const st = initState(getCalc('bin-capacity'), US, null, null);
   Object.assign(st.values, { dia: '30', h: '3', top: 'funnel', repose: '23' });
   log(!!run(getCalc('bin-capacity'), st, US).out.error, 'funnel deeper than the grain is rejected');
@@ -265,6 +271,22 @@ test('adding one step to the notebook', () => {
   const water = snapshot(d.def, d.state, US, d.r, {}, [1]);   // "W × (Mi − Mf) ÷ (100 − Mf)"
   const syms = water.given.map(g => g.sym).filter(Boolean).sort().join(',');
   eq('only inputs the step uses', syms, 'Mf,Mi,W');
+});
+test('summary card snapshot', () => {
+  const c = calc('canola-yield', { plants: 6, pods: 60, spp: 18, tsw: 4.5, loss: '' });
+  const snap = snapshot(c.def, c.state, US, c.r, {}, 'summary');
+  eq('style', snap.style, 'summary');
+  eq('inputs in plain words', snap.given.map(g => g.label).join(' | '), 'Plants per area | Pods per plant | Seeds per pod | Thousand-seed weight');
+  eq('values with units as entered', snap.given[3].text, '4.5 g');
+  eq('main answer', snap.results.find(r => r.primary).text, '56.01 bu/ac');
+  log(!snap.results.some(r => r.sum), 'canola shows no extra results');
+  log(snap.steps.length === c.r.out.work.length, 'full working kept for "show working"');
+  const b = calc('bin-capacity', { dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });
+  const bs = snapshot(b.def, b.state, US, b.r, {}, 'summary');
+  eq('bin supporting result', bs.results.filter(r => r.sum).map(r => r.label).join(','), 'Weight');
+  log(bs.given.some(g => g.text === '6 rings'), 'rings shown as entered');
+  const t = calc('time-to-finish', { acres: 640, cap: 22, hpd: 10, machines: '' });
+  eq('blank optional inputs left out', snapshot(t.def, t.state, US, t.r, {}, 'summary').given.some(g => g.label === 'Machines running'), false);
 });
 test('unit dropdowns only offer practical units', () => {
   const bin = getCalc('bin-capacity').fields.find(f => f.name === 'dia');

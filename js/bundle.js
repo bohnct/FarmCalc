@@ -70,6 +70,8 @@ const ICONS = {
   marker: '<path d="M9 14l-4 4v2h4l4-4"/><path d="M9 14l6-10 5 5-10 6z"/><path d="M4 22h16" opacity=".5"/>',
   line: '<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="5" r="1.5"/>',
   text: '<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>',
+  foldTools: '<path d="M14 6l-6 6 6 6"/><path d="M19 6l-6 6 6 6" opacity=".5"/>',
+  expandTools: '<path d="M10 6l6 6-6 6"/><path d="M5 6l6 6-6 6" opacity=".5"/>',
   eraser: '<path d="M8 20h12"/><path d="M4.5 15.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L12 18H7z"/><path d="M9 11l5 5"/>',
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
@@ -93,6 +95,32 @@ const ICONS = {
 };
 
 function icon(name, cls) { return svg(ICONS[name] || '', cls); }
+
+/**
+ * A choice field in the app's own style: a segmented toggle when there are
+ * two or three short options, otherwise a button that opens a picker sheet.
+ */
+function choiceControl(id, label, opts, current, onChange) {
+  const cur = opts.find(o => o.value === current) || opts[0];
+  if (opts.length <= 3 && opts.every(o => o.label.length <= 14)) {
+    return h('div.seg.choice-seg', { id, role: 'radiogroup', 'aria-label': label },
+      opts.map(o => h('button' + (o.value === cur?.value ? '.on' : ''), {
+        type: 'button', role: 'radio', 'aria-checked': String(o.value === cur?.value),
+        on: { click: () => { if (o.value !== cur?.value) onChange(o.value); } },
+      }, o.label)));
+  }
+  return h('button.pick-btn', {
+    id, type: 'button', 'aria-label': `${label}: ${cur?.label || ''}`,
+    on: {
+      click: () => openSheet(close => [
+        h('h3', label),
+        ...opts.map(o => h('button.list-item' + (o.value === cur?.value ? '.on' : ''), {
+          on: { click: () => { close(); if (o.value !== cur?.value) onChange(o.value); } },
+        }, h('div.li-main', h('div.li-title', o.label)), o.value === cur?.value ? icon('check') : null)),
+      ]),
+    },
+  }, h('span.pick-label', cur?.label || ''), icon('chev'));
+}
 
 // ---------- Toast ----------
 let toastTimer;
@@ -158,7 +186,7 @@ function confirmSheet(title, message, okLabel = 'Delete') {
     ]);
   });
 }
-Object.assign(__exp, { h, svg, ICONS, icon, toast, openSheet, promptSheet, confirmSheet });
+Object.assign(__exp, { h, svg, ICONS, icon, choiceControl, toast, openSheet, promptSheet, confirmSheet });
 return __exp;
 })();
 
@@ -285,6 +313,7 @@ const DIMS = {
     units: {
       in: { label: 'in', f: 1 / 12 }, ft: { label: 'ft', f: 1 }, yd: { label: 'yd', f: 3 },
       rod: { label: 'rod', f: 16.5 }, mi: { label: 'mi', f: 5280 },
+      ring: { label: 'rings', f: c => (c.ringIn || 44) / 12 },   // grain bin sidewall rings (ring height from ctx)
       mm: { label: 'mm', f: FT_PER_M / 1000 }, cm: { label: 'cm', f: FT_PER_M / 100 },
       m: { label: 'm', f: FT_PER_M }, km: { label: 'km', f: FT_PER_M * 1000 },
     },
@@ -627,6 +656,7 @@ __exp.default = [
 
   {
     id: 'moisture-shrink',
+    summary: ['Shrink', 'Net check'],   // supporting results on a notebook summary card
     title: 'Moisture Shrink & Discount',
     category: 'drying',
     desc: 'Elevator shrink, drying charges and net value for wet grain.',
@@ -690,13 +720,27 @@ const GAL_PER_FT3 = 7.48051948;
 __exp.default = [
   {
     id: 'bin-capacity',
+    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Bin Volume',
     category: 'storage',
     desc: 'Bushels in a round bin: level, peaked and hopper bottom.',
     fields: [
       crop,
       { name: 'dia', label: 'Bin diameter', sym: 'D', dim: 'length', unitSet: ['ft', 'm'], def: 30, defMetric: 9 },
-      { name: 'h', label: 'Grain depth at sidewall', sym: 'H', dim: 'length', unitSet: ['ft', 'm'], def: 20, defMetric: 6 },
+      {
+        name: 'h', label: 'Grain depth at sidewall', sym: 'H', dim: 'length', unitSet: ['ft', 'ring', 'm'], def: 20, defMetric: 6,
+        help: 'Tap the unit to count sidewall rings instead',
+      },
+      // Sidewall sheet ("ring") height. Westeel Wide-Corr and Sukup use 44" sheets; older bins 32" or 30".
+      {
+        name: 'ringH', label: 'Ring height', type: 'select', def: '44', show: (v, u) => u.h === 'ring', options: [
+          { value: '44', label: '44″ (Westeel Wide-Corr, Sukup, most current bins)', short: '44″' },
+          { value: '32', label: '32″ (older bins)', short: '32″' },
+          { value: '30', label: '30″ (older Westeel)', short: '30″' },
+          { value: 'custom', label: 'Custom…' },
+        ],
+      },
+      { name: 'ringCustom', label: 'Custom ring height', sym: 'Rh', unit: 'in', def: 39, show: (v, u) => u.h === 'ring' && v.ringH === 'custom' },
       {
         name: 'top', label: 'Top of grain', type: 'select', def: 'level', options: [
           { value: 'level', label: 'Leveled' }, { value: 'peak', label: 'Peaked' }, { value: 'funnel', label: 'Inverted cone' },
@@ -716,10 +760,15 @@ __exp.default = [
       const base = Math.PI * r * r;
       const cyl = base * H;
       let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
-      const work = [
+      const work = [];
+      if (v.hUnit === 'ring') {
+        const rings = H / (ctx.ringIn / 12);
+        work.push(step('Sidewall height', 'rings × ring height', `${n(rings)} × ${n(ctx.ringIn)}″`, `${n(H)} ft`));
+      }
+      work.push(
         step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
         step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
-      ];
+      );
       if (v.top === 'peak') {
         peakH = r * Math.tan(deg(v.repose));
         peak = base * peakH / 3;
@@ -753,6 +802,7 @@ __exp.default = [
           { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
           { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3' }, unitSet: ['ft3', 'm3'] },
           { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
+          ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
           ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
           ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * packF * ctx.tw, dim: 'grain' }] : []),
           ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
@@ -767,6 +817,7 @@ __exp.default = [
 
   {
     id: 'grain-pile',
+    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Grain Pile Volume',
     category: 'storage',
     desc: 'Bushels in a cone pile or a long ridge pile on the ground.',
@@ -819,6 +870,7 @@ __exp.default = [
 
   {
     id: 'truck-load',
+    summary: ['Net tons'],   // supporting results on a notebook summary card
     title: 'Truck / Wagon Load',
     category: 'storage',
     desc: 'Scale ticket weights to net bushels and tons.',
@@ -863,6 +915,7 @@ const G_PER_LB = 453.592;
 __exp.default = [
   {
     id: 'canola-yield',
+    summary: [],   // supporting results on a notebook summary card
     title: 'Canola Yield Estimate',
     category: 'yield',
     crop: 'canola',
@@ -905,6 +958,7 @@ __exp.default = [
 
   {
     id: 'wheat-yield',
+    summary: [],   // supporting results on a notebook summary card
     title: 'Wheat Yield Estimate',
     category: 'yield',
     crop: 'wheat',
@@ -991,6 +1045,7 @@ const FIELD_LEN = ['ft', 'yd', 'rod', 'mi', 'm', 'km'];
 __exp.default = [
   {
     id: 'field-productivity',
+    summary: ['Per day'],   // supporting results on a notebook summary card
     title: 'Field Productivity',
     category: 'fieldops',
     desc: 'Acres per hour from implement width, speed and field efficiency.',
@@ -1085,6 +1140,7 @@ __exp.default = [
 
   {
     id: 'time-to-finish',
+    summary: ['As hours & minutes', 'Working days'],   // supporting results on a notebook summary card
     title: 'Time to Finish',
     category: 'fieldops',
     desc: 'Hours and days left to cover the remaining acres.',
@@ -1125,6 +1181,7 @@ const { n, m, step, fail } = __mods['js/calcs/_h.js'];
 __exp.default = [
   {
     id: 'seeding-rate',
+    summary: ['Seeds to plant', 'Units per acre'],   // supporting results on a notebook summary card
     title: 'Seeding Rate',
     category: 'seeding',
     desc: 'Seeds per acre to lb/ac, bu/ac and seed units, adjusted for germination.',
@@ -1173,6 +1230,7 @@ __exp.default = [
 
   {
     id: 'plant-population',
+    summary: ['% of target'],   // supporting results on a notebook summary card
     title: 'Plant Population',
     category: 'seeding',
     desc: 'Plants per acre from stand counts in a length of row.',
@@ -1324,6 +1382,7 @@ __exp.default = [
 
   {
     id: 'tank-mix',
+    summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
     desc: 'Acres per tank and how much of each product goes in the tank.',
@@ -1383,6 +1442,7 @@ const N_SOURCES = { urea: { label: 'Urea 46-0-0', n: 46, s: 0 }, ams: { label: '
 __exp.default = [
   {
     id: 'fertilizer-blend',
+    summary: ['Blend analysis', 'Cost per acre'],   // supporting results on a notebook summary card
     title: 'Fertilizer Blend',
     category: 'fertilizer',
     desc: 'Pounds of urea/AMS, MAP/DAP and potash to hit an N-P-K target.',
@@ -1440,6 +1500,7 @@ __exp.default = [
 
   {
     id: 'nitrogen-rate',
+    summary: ['Cost per acre'],   // supporting results on a notebook summary card
     title: 'Nitrogen Rate & Cost',
     category: 'fertilizer',
     desc: 'Product rate for a target N rate, cost per pound of N and per acre.',
@@ -1494,6 +1555,7 @@ const { n, m, step, fail } = __mods['js/calcs/_h.js'];
 __exp.default = [
   {
     id: 'break-even',
+    summary: ['Break-even yield'],   // supporting results on a notebook summary card
     title: 'Break-even Price',
     category: 'marketing',
     desc: 'Price per bushel to cover costs, and break-even yield at a price.',
@@ -1696,6 +1758,8 @@ const DEFAULT_SETTINGS = {
   currency: '$',
   paper: 'grid',         // 'grid' | 'lines' | 'blank'
   smoothing: 'medium',   // ink smoothing for pen & highlighter: 'off' | 'light' | 'medium' | 'strong'
+  hidden: [],            // calculator ids hidden from the home screen (still usable via links/notebook)
+  theme: 'night',        // 'night' | 'day' | 'auto' (follow the phone)
 };
 
 function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
@@ -1776,6 +1840,8 @@ function snapToRule(y) {
 function estimateCardH(c) {
   const wrap = t => Math.max(1, Math.ceil(String(t || '').length / 26));   // ~26 handwritten chars per line
   if (c.kind === 'text') return String(c.text || '').split('\n').reduce((n, l) => n + wrap(l), 0) * RULE + 8;
+  // summary: title, one row per input, the answer, supporting results, "show working"
+  if (c.style === 'summary') return (3 + (c.given?.length || 0) + (c.results || []).filter(r => r.sum).length) * RULE + 12;
   let rows = 1 + (c.given?.length ? c.given.length + 1 : 0);
   for (const s of c.steps || []) rows += 1 + (s.f ? wrap(s.f) : 0) + (s.s && s.s !== s.f ? wrap('= ' + s.s) : 0) + wrap('= ' + s.r);
   return rows * RULE + 12;
@@ -1894,7 +1960,7 @@ __mods['js/pages/home.js'] = (function () {
 const __exp = {};
 const { h, icon } = __mods['js/ui.js'];
 const { CATEGORIES, CALCS } = __mods['js/registry.js'];
-const { prefs } = __mods['js/store.js'];
+const { prefs, settings } = __mods['js/store.js'];
 
 // Home: the FarmCalc header and the calculator tiles, grouped by category
 // (tap a category heading to collapse or expand it).
@@ -1904,8 +1970,9 @@ function renderHome(view) {
 
   const draw = () => {
     list.replaceChildren();
+    const hidden = new Set(settings.hidden || []);   // chosen in Settings → Home screen
     for (const cat of CATEGORIES) {
-      const calcs = CALCS.filter(c => c.category === cat.id);
+      const calcs = CALCS.filter(c => c.category === cat.id && !hidden.has(c.id));
       if (!calcs.length) continue;
       const isCollapsed = collapsed.has(cat.id);
       list.append(h('section.cat' + (isCollapsed ? '.collapsed' : ''),
@@ -1926,6 +1993,9 @@ function renderHome(view) {
         h('div.tiles', calcs.map(c => h('a.tile', { href: `#/calc/${c.id}` },
           h('div.t-title', c.title),
           h('div.t-desc', c.desc))))));
+    }
+    if (!list.children.length) {
+      list.append(h('div.empty', 'All calculators are hidden. ', h('a', { href: '#/settings', style: { color: 'var(--accent)' } }, 'Show them in Settings')));
     }
   };
 
@@ -1982,7 +2052,11 @@ function makeCtx(def, state, settings) {
   let tw = crop.tw;
   const twField = def.fields.find(f => f.name === 'tw');
   if (twField) { const t = parseNum(state.values.tw); if (t > 0) tw = t; }
-  return { cropId, crop, tw, cur: settings.currency || '$', system: settings.system };
+  // bin ring height (inches) for the "rings" length unit
+  let ringIn = 44;
+  if (state.values.ringH === 'custom') { const c = parseNum(state.values.ringCustom); if (c > 0) ringIn = c; }
+  else if (state.values.ringH) ringIn = Number(state.values.ringH) || 44;
+  return { cropId, crop, tw, ringIn, cur: settings.currency || '$', system: settings.system };
 }
 
 function selectOptions(f, v, ctx) {
@@ -1990,7 +2064,8 @@ function selectOptions(f, v, ctx) {
   return typeof f.options === 'function' ? f.options(v, ctx) : f.options;
 }
 
-function isShown(f, values) { return !f.show || f.show(values); }
+// show(values, units): a field can depend on other fields' values or on the unit picked for them
+function isShown(f, values, units = {}) { return !f.show || f.show(values, units); }
 
 /** Unit id to show for a number field (dim units or choice list) */
 function initialUnit(f, system) {
@@ -2118,7 +2193,7 @@ function parseState(def, state, settings) {
   }
   for (const f of def.fields) {
     if (fieldType(f) !== 'number') continue;
-    const shown = isShown(f, state.values);
+    const shown = isShown(f, state.values, state.units);
     const text = state.values[f.name];
     const num = parseNum(text);
     if (!shown) { v[f.name] = null; continue; }
@@ -2130,7 +2205,7 @@ function parseState(def, state, settings) {
     }
     if (f.dim) v[f.name] = toBase(f.dim, num, state.units[f.name], ctx);
     else v[f.name] = num;
-    if (f.choices) v[f.name + 'Unit'] = state.units[f.name];
+    if (f.choices || f.dim) v[f.name + 'Unit'] = state.units[f.name];
   }
   return { v, ctx, missing, bad };
 }
@@ -2167,13 +2242,16 @@ function formatResult(r, ctx, unitOverride) {
  */
 function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
   const { v, ctx, out } = result;
+  // pick === 'summary': a summary card (inputs → answer) that keeps the full working folded away
+  const summary = pick === 'summary';
+  if (summary) pick = null;
   const all = !pick || pick.length >= out.work.length;
   const steps = all ? out.work : out.work.filter((_, i) => pick.includes(i));
   // which input symbols do the chosen steps use? (e.g. "W", "Mi" in "W × (Mi − Mf)")
   const used = sym => !sym || all || steps.some(s => new RegExp(`(^|[^A-Za-z])${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^A-Za-z]|$)`).test(s.f || ''));
   let given = [];
   for (const f of def.fields) {
-    if (!isShown(f, state.values)) continue;
+    if (!isShown(f, state.values, state.units)) continue;
     const t = fieldType(f);
     if (t === 'number') {
       const text = state.values[f.name];
@@ -2183,7 +2261,8 @@ function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
       given.push({ sym: f.sym || '', label: f.label, text: `${val}${ul ? (ul.startsWith('/') || ul === '%' || ul === '°' ? '' : ' ') + ul : ''}` });
     } else {
       const opt = (selectOptions(f, state.values, ctx) || []).find(o => o.value === state.values[f.name]);
-      given.push({ sym: '', label: f.label, text: opt ? opt.label : String(state.values[f.name]) });
+      // `short` (if a choice has one) keeps long descriptions off the notebook card
+      given.push({ sym: '', label: f.label, text: opt ? (opt.short || opt.label) : String(state.values[f.name]) });
     }
   }
   // for a partial pick, keep only inputs the chosen steps reference (plus the crop)
@@ -2204,8 +2283,15 @@ function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
       if (f.choices) prefill[f.name + 'Unit'] = state.units[f.name];
     }
   }
+  // Summary cards show the main answer plus a couple of key supporting results:
+  // the calculator's own `summary` list of result labels, else the first other result.
+  if (summary) {
+    const extra = def.summary || out.results.filter(r => !r.primary).slice(0, 1).map(r => r.label);
+    for (const r of results) r.sum = !r.primary && extra.includes(r.label);
+  }
   return {
     calcId: def.id, title: def.title, category: def.category, date: Date.now(),
+    style: summary ? 'summary' : 'steps',
     subtitle: all ? '' : steps.map(s => s.label).join(' · '),
     given, steps: [...steps.slice(0, -1).map(s => ({ ...s, final: false })), lastStep], results, notes: all ? out.notes || [] : [], prefill,
   };
@@ -2224,6 +2310,30 @@ const __exp = {};
 //     = 56,000 × (25 − 15.5) ÷ (100 − 15.5)
 //     = 6,296 lb   (underlined)
 const { h } = __mods['js/ui.js'];
+
+/**
+ * Summary card: the inputs written out in words (label ...... value), a rule,
+ * then the main answer boxed, plus any key supporting results.
+ * The full working is folded away and shown when `opts.showWork` is true.
+ */
+function renderSummary(c, opts = {}) {
+  const wrap = h('div.hand-steps.summary');
+  wrap.append(h('div.hand-title', c.title));
+  wrap.append(h('div.sum-inputs', (c.given || []).map(g => h('div.sum-row',
+    h('span.sum-label', g.label), h('span.sum-dots'), h('span.sum-val', g.text)))));
+  const main = (c.results || []).find(r => r.primary) || (c.results || [])[0];
+  if (main) {
+    wrap.append(h('div.sum-answer', h('span.sum-alabel', main.label), h('span.sum-dots'), h('span.ans.boxed', main.text)));
+  }
+  for (const r of (c.results || []).filter(x => x.sum)) {
+    wrap.append(h('div.sum-row.sum-extra', h('span.sum-label', r.label), h('span.sum-dots'), h('span.sum-val', r.text)));
+  }
+  if (opts.onToggleWork && (c.steps || []).length) {
+    wrap.append(h('button.work-toggle', { type: 'button', on: { click: opts.onToggleWork } }, opts.showWork ? 'hide working ▴' : 'show working ▾'));
+    if (opts.showWork) wrap.append(renderSteps({ steps: c.steps }, { given: false }));
+  }
+  return wrap;
+}
 
 function renderSteps({ given = [], steps = [], title, subtitle }, opts = {}) {
   const wrap = h('div.hand-steps');
@@ -2254,14 +2364,14 @@ function renderSteps({ given = [], steps = [], title, subtitle }, opts = {}) {
   }
   return wrap;
 }
-Object.assign(__exp, { renderSteps });
+Object.assign(__exp, { renderSummary, renderSteps });
 return __exp;
 })();
 
 // ---- js/pages/calc.js ----
 __mods['js/pages/calc.js'] = (function () {
 const __exp = {};
-const { h, icon, toast, openSheet, promptSheet } = __mods['js/ui.js'];
+const { h, icon, toast, openSheet, promptSheet, choiceControl } = __mods['js/ui.js'];
 const { getCalc } = __mods['js/registry.js'];
 const { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage } = __mods['js/store.js'];
 const { fieldType, initState, run, selectOptions, isShown, unitChoices, fieldUnitLabel, applyCropDefaults, fixSelects, formatResult, snapshot } = __mods['js/engine.js'];
@@ -2278,31 +2388,6 @@ function unitToggle(cls, options, current, onChange, aria) {
   }, options[i].label);
 }
 
-/**
- * A choice field in the app's own style: a segmented toggle when there are
- * two or three short options, otherwise a button that opens a picker sheet.
- */
-function choiceControl(id, label, opts, current, onChange) {
-  const cur = opts.find(o => o.value === current) || opts[0];
-  if (opts.length <= 3 && opts.every(o => o.label.length <= 14)) {
-    return h('div.seg.choice-seg', { id, role: 'radiogroup', 'aria-label': label },
-      opts.map(o => h('button' + (o.value === cur?.value ? '.on' : ''), {
-        type: 'button', role: 'radio', 'aria-checked': String(o.value === cur?.value),
-        on: { click: () => { if (o.value !== cur?.value) onChange(o.value); } },
-      }, o.label)));
-  }
-  return h('button.pick-btn', {
-    id, type: 'button', 'aria-label': `${label}: ${cur?.label || ''}`,
-    on: {
-      click: () => openSheet(close => [
-        h('h3', label),
-        ...opts.map(o => h('button.list-item' + (o.value === cur?.value ? '.on' : ''), {
-          on: { click: () => { close(); if (o.value !== cur?.value) onChange(o.value); } },
-        }, h('div.li-main', h('div.li-title', o.label)), o.value === cur?.value ? icon('check') : null)),
-      ]),
-    },
-  }, h('span.pick-label', cur?.label || ''), icon('chev'));
-}
 
 function renderCalc(view, id, query) {
   const def = getCalc(id);
@@ -2332,7 +2417,7 @@ function renderCalc(view, id, query) {
     fieldsEl.replaceChildren();
     const parsed = run(def, state, settings);
     for (const f of def.fields) {
-      if (!isShown(f, state.values)) continue;
+      if (!isShown(f, state.values, state.units)) continue;
       const t = fieldType(f);
       const help = typeof f.help === 'function' ? f.help(parsed.v) : f.help;
       const label = h('label', { for: 'f-' + f.name }, f.label, f.sym ? h('span.sym', f.sym) : null, help ? h('small', help) : null);
@@ -2441,7 +2526,6 @@ function renderCalc(view, id, query) {
   function addToNotebook() {
     if (!last?.out || last.out.error) return;
     const work = last.out.work;
-    if (work.length === 1) { choosePage([0]); return; }
     const picked = new Set([work.length - 1]);
     openSheet(close => {
       const list = h('div');
@@ -2459,6 +2543,12 @@ function renderCalc(view, id, query) {
       draw();
       return [
         h('h3', `${def.title}: what to add?`),
+        // Summary card: your inputs written out, then the answer (working folded away on the card)
+        h('button.list-item.summary-opt', { type: 'button', on: { click: () => { close(); choosePage('summary'); } } },
+          icon('note'),
+          h('div.li-main', h('div.li-title', 'Summary'), h('div.li-sub', 'Your inputs, then the answer · working tucked away')),
+          icon('chevR')),
+        h('div.sheet-divider', 'or the working, step by step'),
         list,
         h('div.row',
           h('button.btn', { on: { click: () => { work.forEach((_, i) => picked.add(i)); draw(); } } }, 'Select all'),
@@ -2477,7 +2567,7 @@ function renderCalc(view, id, query) {
       }, icon('book'), h('div.li-main', h('div.li-title', p.name), h('div.li-sub', `${p.cards.length} calculation${p.cards.length === 1 ? '' : 's'}`)), p.id === notebook.lastPageId ? icon('check') : null));
       return [
         h('h3', 'Add to notebook page'),
-        h('p.sheet-note', snap.subtitle ? `${def.title}: ${snap.subtitle}` : `${def.title}: whole calculation`),
+        h('p.sheet-note', snap.style === 'summary' ? `${def.title}: summary` : snap.subtitle ? `${def.title}: ${snap.subtitle}` : `${def.title}: whole calculation`),
         ...items,
         h('button.list-item', {
           on: {
@@ -2526,6 +2616,48 @@ Object.assign(__exp, { renderCalc });
 return __exp;
 })();
 
+// ---- js/theme.js ----
+__mods['js/theme.js'] = (function () {
+const __exp = {};
+// Day / Night theme. settings.theme is 'night' | 'day' | 'auto' (follow the phone).
+// The resolved theme goes on <html data-theme="…">; the CSS swaps its color tokens.
+const { settings } = __mods['js/store.js'];
+
+const lightQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+
+function currentTheme() {
+  const t = settings.theme || 'night';
+  if (t === 'auto') return lightQuery && lightQuery.matches ? 'day' : 'night';
+  return t;
+}
+
+function applyTheme() {
+  const t = currentTheme();
+  const root = document.documentElement;
+  if (t === 'day') root.dataset.theme = 'day'; else delete root.dataset.theme;
+  // phone status bar / browser chrome color
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', t === 'day' ? '#f4f2ee' : '#000000');
+  window.dispatchEvent(new CustomEvent('themechange', { detail: t }));
+}
+
+if (lightQuery) {
+  const onChange = () => { if ((settings.theme || 'night') === 'auto') applyTheme(); };
+  if (lightQuery.addEventListener) lightQuery.addEventListener('change', onChange); else lightQuery.addListener(onChange);
+}
+
+/**
+ * Pen colors are saved as chosen; "white" means "ink", which is drawn
+ * near-black on Day paper so it stays visible. Other colors are unchanged.
+ */
+function inkColor(c) {
+  if (currentTheme() === 'day' && (c || '').toLowerCase() === '#ffffff') return '#1d1d1d';
+  return c;
+}
+Object.assign(__exp, { currentTheme, applyTheme, inkColor });
+return __exp;
+})();
+
 // ---- js/pages/notebook.js ----
 __mods['js/pages/notebook.js'] = (function () {
 const __exp = {};
@@ -2533,9 +2665,10 @@ const __exp = {};
 // on top for pen, highlighter, straight lines/arrows and a stroke eraser.
 const { h, icon, toast, openSheet, promptSheet, confirmSheet } = __mods['js/ui.js'];
 const { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } = __mods['js/store.js'];
-const { renderSteps } = __mods['js/steps.js'];
+const { renderSteps, renderSummary } = __mods['js/steps.js'];
 const { getCalc } = __mods['js/registry.js'];
 const { fmtDate } = __mods['js/format.js'];
+const { inkColor } = __mods['js/theme.js'];
 
 const PEN_COLORS = ['#ffffff', '#ff7a00', '#ff4d4d', '#ffd400', '#3ddc84', '#4da3ff'];
 const HL_COLORS = ['#ffe14d', '#ff7a00', '#3ddc84', '#ff5fa2', '#4da3ff'];
@@ -2580,7 +2713,7 @@ async function renderNotebook(view, query) {
   const pageNoEl = h('div.ph-sub');
   const dateEl = h('span.ph-date-val');
   const heading = h('button.nb-head', { type: 'button', 'aria-label': 'Page heading: tap to rename or switch pages', on: { click: pageSheet } },
-    h('div.ph-left', h('div.ph-title', nameEl, h('span.ph-caret', icon('chev'))), pageNoEl),
+    h('div.ph-left', h('div.ph-title', h('div.ph-name-row', nameEl, h('span.ph-caret', icon('chev')))), pageNoEl),
     h('div.ph-date', h('span.ph-date-label', 'Date'), dateEl));
   const paper = h('div.nb-paper', { style: { width: PAGE_W + 'px', height: PAGE_H + 'px' } },
     h('div.nb-rules'),
@@ -2601,8 +2734,9 @@ async function renderNotebook(view, query) {
       h('button.icon-btn', { 'aria-label': 'Calculation history', title: 'History', on: { click: historySheet } }, icon('history')),
       h('button.icon-btn', { 'aria-label': 'Export page as image', title: 'Export image', on: { click: exportPng } }, icon('share'))),
     h('div.nb-zoom',
-      h('button', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
-      h('button', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
+      // +/− only show with a mouse; on a phone you pinch to zoom (see CSS)
+      h('button.zbtn', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
+      h('button.zbtn', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
       h('button', { 'aria-label': 'Fit content', on: { click: fitContent } }, icon('fit'))),
     emptyEl, toolsEl);
   view.append(nb);
@@ -2737,14 +2871,16 @@ async function renderNotebook(view, query) {
           h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
           h('button', { 'aria-label': 'Edit text', on: { click: () => editText(c) } }, icon('edit')),
           h('button', { 'aria-label': 'Text options', on: { click: () => cardMenu(c) } }, icon('more'))),
-        h('div.ncard-text', { style: { color: c.color || '#fff', fontSize: (c.size || 26) + 'px' } }, c.text));
+        h('div.ncard-text', { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
     }
     const el = h('div.ncard' + (c.collapsed ? '.collapsed' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
       h('div.ncard-head',
         h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
         h('button', { 'aria-label': c.collapsed ? 'Expand' : 'Collapse', on: { click: () => { c.collapsed = !c.collapsed; saveNotebook(); renderCards(); requestDraw(); } } }, icon(c.collapsed ? 'expand' : 'collapse')),
         h('button', { 'aria-label': 'Card options', on: { click: () => cardMenu(c) } }, icon('more'))),
-      h('div.ncard-body', renderSteps(c)),
+      h('div.ncard-body', c.style === 'summary'
+        ? renderSummary(c, { showWork: !!c.showWork, onToggleWork: () => { c.showWork = !c.showWork; saveNotebook(); renderCards(); requestDraw(); } })
+        : renderSteps(c)),
       c.note ? h('div.ncard-note', c.note) : null);
     return el;
   }
@@ -2798,7 +2934,7 @@ async function renderNotebook(view, query) {
       h('div.seg', TEXT_SIZES.map(([name, w]) => h('button' + ((c.size || 26) === w ? '.on' : ''), { type: 'button', on: { click: () => restyle({ size: w }) } }, name))),
       h('div.ts-label', 'Color'),
       h('div.ts-swatches', PEN_COLORS.map(col => h('button.sw' + ((c.color || '#ffffff') === col ? '.on' : ''), {
-        type: 'button', 'aria-label': `Color ${col}`, style: { background: col }, on: { click: () => restyle({ color: col }) },
+        type: 'button', 'aria-label': `Color ${col}`, style: { background: inkColor(col) }, on: { click: () => restyle({ color: col }) },
       }))));
     draw();
     return wrap;
@@ -3090,6 +3226,9 @@ async function renderNotebook(view, query) {
   const stopGesture = e => e.preventDefault();
   document.addEventListener('gesturestart', stopGesture);
   window.addEventListener('resize', resize);
+  // switching Day/Night repaints ink and text notes in the right colors
+  const onTheme = () => { renderCards(); requestDraw(); buildTools(); };
+  window.addEventListener('themechange', onTheme);
 
   // ---------- undo / redo ----------
   function apply(a, reverse) {
@@ -3125,20 +3264,28 @@ async function renderNotebook(view, query) {
     ['line', 'line', 'Line'], ['text', 'text', 'Text'], ['eraser', 'eraser', 'Eraser'],
   ];
   let undoBtn, redoBtn;
+  // The toolbar can fold down to just the active tool + an expand button, to free up the page.
+  let toolsFolded = prefs.get('toolsFolded', false);
   function buildTools() {
     toolsEl.replaceChildren();
+    toolsEl.classList.toggle('folded', toolsFolded);
+    const foldBtn = h('button.fold', {
+      'aria-label': toolsFolded ? 'Show all tools' : 'Hide tools', title: toolsFolded ? 'Show all tools' : 'Hide tools',
+      on: { click: () => { toolsFolded = !toolsFolded; prefs.set('toolsFolded', toolsFolded); closePop(); buildTools(); } },
+    }, icon(toolsFolded ? 'expandTools' : 'foldTools'));
     for (const [id, ic, label] of TOOLS) {
       const on = tool === id;
+      if (toolsFolded && !on) continue;
       toolsEl.append(h('button' + (on ? '.on' : ''), {
         'aria-label': on && toolOpts[id] ? `${label} (tap again for color & size)` : label,
         title: on && toolOpts[id] ? `${label}: tap again for color & size` : label, 'aria-pressed': String(on),
         on: { click: () => { if (tool === id && toolOpts[id]) togglePop(); else setTool(id); } },
       }, icon(ic), on && toolOpts[id] ? h('i.tdot') : null));
     }
-    toolsEl.append(h('span.sep'));
     undoBtn = h('button', { 'aria-label': 'Undo', title: 'Undo', on: { click: doUndo } }, icon('undo'));
     redoBtn = h('button', { 'aria-label': 'Redo', title: 'Redo', on: { click: doRedo } }, icon('redo'));
-    toolsEl.append(undoBtn, redoBtn);
+    if (toolsFolded) toolsEl.append(undoBtn, foldBtn);
+    else toolsEl.append(h('span.sep'), undoBtn, redoBtn, foldBtn);
     syncTools();
   }
   function syncTools() {
@@ -3159,7 +3306,7 @@ async function renderNotebook(view, query) {
     const build = () => {
       popEl.replaceChildren(
         h('div.tp-label', 'Color'),
-        h('div.tp-row', colors.map(c => h('button.sw' + (o.color === c ? '.on' : ''), { style: { background: c }, 'aria-label': c, on: { click: () => { o.color = c; save(); build(); } } }))),
+        h('div.tp-row', colors.map(c => h('button.sw' + (o.color === c ? '.on' : ''), { style: { background: inkColor(c) }, 'aria-label': c, on: { click: () => { o.color = c; save(); build(); } } }))),
         h('div.tp-label', tool === 'text' ? 'Size' : 'Thickness'),
         tool === 'text'
           ? h('div.seg.size-seg', TEXT_SIZES.map(([name, w]) => h('button' + (o.width === w ? '.on' : ''), { type: 'button', on: { click: () => { o.width = w; save(); build(); } } }, name)))
@@ -3279,6 +3426,7 @@ async function renderNotebook(view, query) {
   cleanup = () => {
     document.removeEventListener('gesturestart', stopGesture);
     window.removeEventListener('resize', resize);
+    window.removeEventListener('themechange', onTheme);
     saveNotebook(true);
   };
   return cleanup;
@@ -3296,7 +3444,7 @@ function drawStroke(g, s) {
   if (!p || p.length < 2) return;
   g.save();
   g.lineCap = 'round'; g.lineJoin = 'round';
-  g.strokeStyle = s.color; g.fillStyle = s.color;
+  g.strokeStyle = g.fillStyle = inkColor(s.color);   // white ink shows dark on Day paper
   if (s.tool === 'hl') { g.globalAlpha = 0.38; g.lineCap = 'butt'; }
   if (s.tool === 'line') {
     g.lineWidth = s.width;
@@ -3435,33 +3583,36 @@ function drawCardToCanvas(g, el, c, viewScale) {
 }
 /** Paint the paper (rules, margin, holes, heading) onto the export canvas, matching the CSS. */
 function drawPaper(g, W, H, style, page, headingEl) {
-  g.fillStyle = '#0b0b0b'; g.fillRect(0, 0, W, H);
+  // read the current theme's paper colors so the image matches the screen
+  const css = getComputedStyle(document.documentElement);
+  const tok = name => css.getPropertyValue(name).trim();
+  g.fillStyle = tok('--paper'); g.fillRect(0, 0, W, H);
   g.save();
   g.lineWidth = 1;
   if (style === 'lines') {
-    g.strokeStyle = 'rgba(77,163,255,.24)';
+    g.strokeStyle = tok('--rule');
     for (let y = HEAD_H + 36; y < H; y += 36) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(W, y + 0.5); g.stroke(); }
-    g.strokeStyle = 'rgba(255,90,90,.45)';
+    g.strokeStyle = tok('--margin-line');
     g.beginPath(); g.moveTo(MARGIN_X + 0.5, 0); g.lineTo(MARGIN_X + 0.5, H); g.stroke();
     for (const f of [0.18, 0.5, 0.82]) {
       const cy = PAGE_H * f; if (cy > H) continue;
-      g.fillStyle = '#050505'; g.beginPath(); g.arc(46, cy, 17, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = '#1f1f1f'; g.stroke();
+      g.fillStyle = tok('--desk'); g.beginPath(); g.arc(46, cy, 17, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = tok('--paper-edge'); g.stroke();
     }
   } else if (style === 'grid') {
-    g.strokeStyle = 'rgba(255,255,255,.055)';
+    g.strokeStyle = tok('--grid');
     for (let y = HEAD_H; y < H; y += 32) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(W, y + 0.5); g.stroke(); }
     for (let x = 0; x < W; x += 32) { g.beginPath(); g.moveTo(x + 0.5, HEAD_H); g.lineTo(x + 0.5, H); g.stroke(); }
   }
-  // heading: copy the laid-out text of the on-screen heading
+  // heading: page name and date
   const left = style === 'lines' ? MARGIN_X + 22 : 40;
-  g.strokeStyle = 'rgba(255,255,255,.28)'; g.lineWidth = 2;
+  g.strokeStyle = tok('--head-rule'); g.lineWidth = 2;
   g.beginPath(); g.moveTo(0, HEAD_H - 4); g.lineTo(W, HEAD_H - 4); g.stroke();
   g.lineWidth = 1; g.beginPath(); g.moveTo(0, HEAD_H); g.lineTo(W, HEAD_H); g.stroke();
   const font = getComputedStyle(headingEl.querySelector('.ph-name')).fontFamily;
-  g.fillStyle = '#fff'; g.font = `700 54px ${font}`; g.textBaseline = 'alphabetic';
+  g.fillStyle = tok('--ink-strong'); g.font = `700 54px ${font}`; g.textBaseline = 'alphabetic';
   g.fillText(page.name, left, 88, W - left - 260);
-  g.fillStyle = '#ff9a3d'; g.font = `500 26px ${font}`;
+  g.fillStyle = tok('--accent-2'); g.font = `500 26px ${font}`;
   g.fillText(new Date(page.created || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), Math.max(left + 300, W - 230), 88);
   g.restore();
 }
@@ -3478,9 +3629,11 @@ return __exp;
 // ---- js/pages/settings.js ----
 __mods['js/pages/settings.js'] = (function () {
 const __exp = {};
-const { h, toast, confirmSheet } = __mods['js/ui.js'];
+const { h, toast, confirmSheet, openSheet, choiceControl } = __mods['js/ui.js'];
 const { settings, saveSettings, exportBackup, importBackup, clearAll, notebook } = __mods['js/store.js'];
 const { CROPS } = __mods['js/crops.js'];
+const { CATEGORIES, CALCS } = __mods['js/registry.js'];
+const { applyTheme } = __mods['js/theme.js'];
 
 function renderSettings(view) {
   const seg = (key, opts) => {
@@ -3491,9 +3644,40 @@ function renderSettings(view) {
     draw();
     return el;
   };
-  const select = (key, opts) => h('select.select', {
-    on: { change: e => saveSettings({ [key]: e.target.value }) },
-  }, opts.map(([val, label]) => h('option', { value: val, selected: settings[key] === val }, label)));
+  // same styled picker as the calculators (no native dropdowns)
+  const select = (key, opts, label) => {
+    const el = h('div.pick-wrap');
+    const draw = () => el.replaceChildren(choiceControl('set-' + key, label, opts.map(([value, l]) => ({ value, label: l })), settings[key],
+      val => { saveSettings({ [key]: val }); draw(); }));
+    draw();
+    return el;
+  };
+
+  // ---- which calculators show on the home screen ----
+  const shownCount = () => CALCS.length - (settings.hidden || []).filter(id => CALCS.some(c => c.id === id)).length;
+  const homeSub = h('small');
+  const updateHomeSub = () => { homeSub.textContent = `${shownCount()} of ${CALCS.length} shown. Hidden ones stay in the app; turn them back on any time.`; };
+  updateHomeSub();
+  const chooseCalcs = () => openSheet(() => {
+    const hidden = new Set(settings.hidden || []);
+    const toggle = (id, sw) => {
+      if (hidden.has(id)) hidden.delete(id); else hidden.add(id);
+      saveSettings({ hidden: [...hidden] });
+      sw.classList.toggle('on', !hidden.has(id));
+      sw.setAttribute('aria-checked', String(!hidden.has(id)));
+      updateHomeSub();
+    };
+    return [
+      h('h3', 'Calculators on home screen'),
+      ...CATEGORIES.map(cat => h('div.calc-toggle-group',
+        h('div.ctg-head', cat.label),
+        CALCS.filter(c => c.category === cat.id).map(c => {
+          const sw = h('span.switch' + (hidden.has(c.id) ? '' : '.on'), { role: 'switch', 'aria-checked': String(!hidden.has(c.id)) }, h('i'));
+          return h('button.list-item.calc-toggle', { type: 'button', 'aria-label': `Show ${c.title} on home screen`, on: { click: () => toggle(c.id, sw) } },
+            h('div.li-main', h('div.li-title', c.title)), sw);
+        }))),
+    ];
+  });
 
   const row = (title, sub, control) => h('div.set-row', h('div.s-text', title, sub ? h('small', sub) : null), control);
 
@@ -3524,13 +3708,26 @@ function renderSettings(view) {
 
   view.append(...[
     h('header.topbar', h('h1', 'Settings')),
+    h('div.set-group', h('h2', 'Appearance'),
+      h('div.panel',
+        h('div.set-row.stack',
+          h('div.s-text', 'Theme', h('small', 'Night is black with white & orange. Day is light paper with dark ink. Auto follows your phone.')),
+          (() => {
+            const el = seg('theme', [['night', 'Night'], ['day', 'Day'], ['auto', 'Auto']]);
+            el.addEventListener('click', () => applyTheme());
+            return el;
+          })()))),
     h('div.set-group', h('h2', 'Units'),
       h('div.panel',
         row('Unit system', 'Default units for new inputs and results', seg('system', [['us', 'US'], ['metric', 'Metric']])),
-        row('Default crop', null, select('crop', Object.entries(CROPS).map(([k, c]) => [k, c.label]))),
-        row('Decimal places', 'Auto rounds big numbers more', select('decimals', [['auto', 'Auto'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']])),
+        row('Default crop', null, select('crop', Object.entries(CROPS).map(([k, c]) => [k, c.label]), 'Default crop')),
+        row('Decimal places', 'Auto rounds big numbers more', select('decimals', [['auto', 'Auto'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']], 'Decimal places')),
         row('Currency symbol', null, h('input.text-input', { type: 'text', value: settings.currency, maxlength: 3, on: { input: e => saveSettings({ currency: e.target.value || '$' }) } })),
       )),
+    h('div.set-group', h('h2', 'Home screen'),
+      h('div.panel',
+        h('div.set-row', h('div.s-text', 'Calculators shown', homeSub),
+          h('button.btn.small', { type: 'button', on: { click: chooseCalcs } }, 'Choose')))),
     h('div.set-group', h('h2', 'Notebook'),
       h('div.panel',
         row('Paper', null, seg('paper', [['grid', 'Grid'], ['lines', 'Lines'], ['blank', 'Blank']])),
@@ -3573,7 +3770,9 @@ const { renderCalc } = __mods['js/pages/calc.js'];
 const { renderNotebook } = __mods['js/pages/notebook.js'];
 const { renderSettings } = __mods['js/pages/settings.js'];
 const { saveNotebook } = __mods['js/store.js'];
+const { applyTheme } = __mods['js/theme.js'];
 
+applyTheme();
 const view = document.getElementById('view');
 const tabs = document.querySelectorAll('#tabbar a');
 const scrollPos = {};

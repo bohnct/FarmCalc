@@ -16,6 +16,7 @@ export const DIMS = {
     units: {
       in: { label: 'in', f: 1 / 12 }, ft: { label: 'ft', f: 1 }, yd: { label: 'yd', f: 3 },
       rod: { label: 'rod', f: 16.5 }, mi: { label: 'mi', f: 5280 },
+      ring: { label: 'rings', f: c => (c.ringIn || 44) / 12 },   // grain bin sidewall rings (ring height from ctx)
       mm: { label: 'mm', f: FT_PER_M / 1000 }, cm: { label: 'cm', f: FT_PER_M / 100 },
       m: { label: 'm', f: FT_PER_M }, km: { label: 'km', f: FT_PER_M * 1000 },
     },
