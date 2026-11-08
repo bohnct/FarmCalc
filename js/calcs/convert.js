@@ -36,7 +36,6 @@ export default [
       return {
         results: [
           { label: `${n(value)} ${fl} =`, value: out, unit: tl, primary: true, decimals: Math.abs(out) < 1 ? 6 : undefined },
-          ...allRows(dim, value, from, ctx).filter(r => r.label !== tl),
         ],
         work: [step(`${fl} to ${tl}`, dim === 'temperature' ? factorText(dim, from, to, ctx) : `x ${factorText(dim, from, to, ctx)}`, dim === 'temperature' ? `x = ${n(value)} ${fl}` : `${n(value)} ${factorText(dim, from, to, ctx)}`, `${n(out, Math.abs(out) < 1 ? 6 : undefined)} ${tl}`, true)],
       };

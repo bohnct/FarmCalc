@@ -1,11 +1,14 @@
 import { h, icon } from '../ui.js';
 import { CATEGORIES, CALCS } from '../registry.js';
-import { prefs, settings } from '../store.js';
+import { settings } from '../store.js';
 
 // Home: the FarmCalc header and the calculator tiles, grouped by category
 // (tap a category heading to collapse or expand it).
+// Groups start minimized each time the app opens; ones you open stay open
+// while you go in and out of calculators.
+const opened = new Set();
+
 export function renderHome(view) {
-  const collapsed = new Set(prefs.get('collapsed', []));
   const list = h('div.cat-list');
 
   const draw = () => {
@@ -14,14 +17,13 @@ export function renderHome(view) {
     for (const cat of CATEGORIES) {
       const calcs = CALCS.filter(c => c.category === cat.id && !hidden.has(c.id));
       if (!calcs.length) continue;
-      const isCollapsed = collapsed.has(cat.id);
+      const isCollapsed = !opened.has(cat.id);
       list.append(h('section.cat' + (isCollapsed ? '.collapsed' : ''),
         h('button.cat-head', {
           'aria-expanded': String(!isCollapsed),
           on: {
             click: () => {
-              if (collapsed.has(cat.id)) collapsed.delete(cat.id); else collapsed.add(cat.id);
-              prefs.set('collapsed', [...collapsed]);
+              if (opened.has(cat.id)) opened.delete(cat.id); else opened.add(cat.id);
               draw();
             },
           },

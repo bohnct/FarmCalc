@@ -29,7 +29,7 @@ async function route() {
   const section = parts[0] || 'home';
   tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === (section === 'calc' ? 'home' : section)));
 
-  if (section === 'calc') renderCalc(view, parts[1], query);
+  if (section === 'calc') leaveNotebook = renderCalc(view, parts[1], query) || null;   // (also stops the GPS speedometer)
   else if (section === 'notebook') leaveNotebook = await renderNotebook(view, query);
   else if (section === 'settings') renderSettings(view);
   else renderHome(view);

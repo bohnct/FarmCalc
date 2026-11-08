@@ -90,7 +90,8 @@ const ICONS = {
   yield: '<path d="M12 21V8"/><path d="M12 8c-2-1-3-3-3-5 2 0 3 2 3 5zM12 8c2-1 3-3 3-5-2 0-3 2-3 5z"/><path d="M12 13c-2-1-3.5-2.5-3.5-4.5 2 0 3.5 2 3.5 4.5zM12 13c2-1 3.5-2.5 3.5-4.5-2 0-3.5 2-3.5 4.5z"/><path d="M12 18c-2-1-3.5-2.5-3.5-4.5 2 0 3.5 2 3.5 4.5zM12 18c2-1 3.5-2.5 3.5-4.5-2 0-3.5 2-3.5 4.5z"/>',
   fieldops: '<circle cx="7" cy="17" r="3"/><circle cx="18" cy="18" r="2"/><path d="M4 14V9h7l2 5h5l1 3"/><path d="M8 9V6h3"/>',
   seeding: '<path d="M12 20v-7"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6z"/><path d="M12 15c0-3-2.5-5-6-5 0 3 2.5 5 6 5z"/><path d="M5 20h14"/>',
-  spraying: '<path d="M4 9h12v3H4z"/><path d="M16 10.5h3"/><path d="M6 12v2M10 12v2M14 12v2"/><path d="M5 16l1 4M10 16v4M15 16l-1 4"/>',
+  // spray nozzle: hex nut, tapered tip, fan of spray
+  spraying: '<path d="M9 2.5h6l1 2-1 2H9l-1-2z"/><path d="M10 6.5h4l-.8 3.5h-2.4z"/><path d="M10.2 13.2L5.5 19.5M11.1 13.6L9 21M12 13.8V21.5M12.9 13.6L15 21M13.8 13.2l4.7 6.3"/>',
   fertilizer: '<path d="M7 3h10l-2 4H9z"/><path d="M9 7c-3 2-4 5-4 8a7 7 0 0 0 14 0c0-3-1-6-4-8"/><path d="M10 14h4M12 12v4"/>',
   marketing: '<path d="M4 19h16"/><path d="M5 15l4-4 3 3 6-7"/><path d="M15 7h3v3"/>',
   convert: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
@@ -628,18 +629,16 @@ return __exp;
 // ---- js/calcs/drying.js ----
 __mods['js/calcs/drying.js'] = (function () {
 const __exp = {};
-const { n, m, step, pctStr, fail } = __mods['js/calcs/_h.js'];
+const { n, step, pctStr, fail } = __mods['js/calcs/_h.js'];
 
 const crop = { name: 'crop', label: 'Crop', type: 'crop' };
-const FUEL_UNITS = [{ value: 'L', label: 'L' }, { value: 'gal', label: 'gal' }];
-const FUEL_PRICE = [{ value: 'L', label: '/L' }, { value: 'gal', label: '/gal' }];
 
 __exp.default = [
   {
     id: 'grain-drying',
     title: 'Grain Drying',
     category: 'drying',
-    desc: 'Water removed, shrink and dry bushels when drying grain down.',
+    desc: 'Dry bushels left after drying wet grain down.',
     fields: [
       crop,
       { name: 'wet', label: 'Wet grain', sym: 'W', dim: 'grain', def: 1000, help: 'Wet bushels = wet weight ÷ test weight' },
@@ -651,143 +650,44 @@ __exp.default = [
       const { mi, mf } = v;
       if (mf >= 100 || mi >= 100) return fail('Moisture must be below 100%.');
       if (mi <= mf) return fail('Initial moisture must be higher than final moisture.');
-      const W = v.wet, tw = ctx.tw, wetBu = W / tw;
-      const water = W * (mi - mf) / (100 - mf);
-      const lossPct = v.loss || 0;
-      const loss = W * lossPct / 100;
-      const dry = W - water - loss;
-      const dryBu = dry / tw;
-      const shrinkPct = (water + loss) / W * 100;
-      const perPt = 100 / (100 - mf);
-      const work = [
-        step('Wet weight', 'W × test wt', `${n(wetBu)} bu × ${n(tw)} lb/bu`, `${n(W)} lb`),
-        step('Water removed', 'W × (Mi − Mf) ÷ (100 − Mf)', `${n(W)} × (${n(mi)} − ${n(mf)}) ÷ (100 − ${n(mf)})`, `${n(water)} lb`),
-      ];
-      if (loss > 0) work.push(step('Handling loss', 'W × L', `${n(W)} × ${n(lossPct)}%`, `${n(loss)} lb`));
-      work.push(
-        step('Dry weight', loss > 0 ? 'W − water − loss' : 'W − water', loss > 0 ? `${n(W)} − ${n(water)} − ${n(loss)}` : `${n(W)} − ${n(water)}`, `${n(dry)} lb`),
-        step('Dry bushels', 'dry wt ÷ test wt', `${n(dry)} ÷ ${n(tw)}`, `${n(dryBu)} bu`, true),
-      );
+      const wetBu = v.wet / ctx.tw;
+      const L = (v.loss || 0) / 100;
+      // dry = W × (100 − Mi) ÷ (100 − Mf), less the handling loss (a share of the wet grain)
+      const dryBu = wetBu * ((100 - mi) / (100 - mf) - L);
+      const work = [L
+        ? step('Dry bushels', 'W × [(100 − Mi) ÷ (100 − Mf) − L]', `${n(wetBu)} bu × [(100 − ${n(mi)}) ÷ (100 − ${n(mf)}) − ${n(L * 100)}%]`, `${n(dryBu)} bu`, true)
+        : step('Dry bushels', 'W × (100 − Mi) ÷ (100 − Mf)', `${n(wetBu)} bu × (100 − ${n(mi)}) ÷ (100 − ${n(mf)})`, `${n(dryBu)} bu`, true)];
       return {
-        results: [
-          { label: 'Dry grain', value: dry, dim: 'grain', primary: true },
-          { label: 'Water removed', value: water, dim: 'mass' },
-          { label: 'Water removed (volume)', value: water / 8.34, dim: 'volume' },
-          { label: 'Total shrink', value: shrinkPct, unit: '%' },
-          { label: 'Shrink per point', value: perPt, unit: '%', decimals: 3 },
-          { label: 'Points removed', value: mi - mf, unit: 'pts' },
-        ],
+        results: [{ label: 'Dry grain', value: dryBu * ctx.tw, dim: 'grain', primary: true }],
         work,
-        notes: [`Water shrink factor at ${n(mf)}% = 100 ÷ (100 − ${n(mf)}) = ${pctStr(perPt, 3)} per point.`],
-        links: [{ calc: 'drying-cost', label: 'Drying cost', values: { crop: v.crop, bu: W, mi, mf } }],
-      };
-    },
-  },
-
-  {
-    id: 'drying-cost',
-    title: 'Drying Cost',
-    category: 'drying',
-    desc: 'Fuel use and cost per bushel to dry grain, or a custom drying charge.',
-    fields: [
-      crop,
-      { name: 'bu', label: 'Grain dried (wet)', sym: 'B', dim: 'grain', def: 1000 },
-      { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 18, cropDefault: 'harvest' },
-      { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 15.5, cropDefault: 'moist' },
-      { name: 'method', label: 'Cost method', type: 'select', def: 'fuel', options: [{ value: 'fuel', label: 'Dryer fuel use' }, { value: 'rate', label: 'Custom charge' }] },
-      { name: 'use', label: 'Fuel per bu per point', sym: 'F', choices: FUEL_UNITS, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 0.02, defs: { gal: 0.02, L: 0.076 }, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.076 L (0.02 gal) per bu per point' },
-      { name: 'price', label: 'Fuel price', sym: 'P', money: true, choices: FUEL_PRICE, choiceDefault: { us: 'gal', metric: 'L', sk: 'L' }, def: 1.5, defs: { gal: 1.5, L: 0.6 }, show: v => v.method === 'fuel', help: 'Propane price (rough placeholder; type yours)' },
-      { name: 'other', label: 'Electric & other per bu', sym: 'E', money: true, unit: '/bu', def: 0.01, optional: true, show: v => v.method === 'fuel' },
-      { name: 'rate', label: 'Charge per point per bu', sym: 'C', money: true, unit: '/pt', def: 0.04, show: v => v.method === 'rate' },
-    ],
-    compute(v, ctx) {
-      const pts = v.mi - v.mf;
-      if (pts <= 0) return fail('Initial moisture must be higher than final moisture.');
-      const bu = v.bu / ctx.tw;
-      let total, work;
-      const results = [];
-      if (v.method === 'rate') {
-        total = bu * pts * v.rate;
-        work = [
-          step('Points removed', 'Mi − Mf', `${n(v.mi)} − ${n(v.mf)}`, `${n(pts)} pts`),
-          step('Drying charge', 'B × pts × C', `${n(bu)} × ${n(pts)} × ${m(v.rate, ctx, 3)}`, m(total, ctx), true),
-        ];
-      } else {
-        // fuel in its own unit (L or gal); price converted to that same unit
-        const fu = v.useUnit === 'L' ? 'L' : 'gal';
-        const L_PER_GAL = 3.785411784;
-        const pricePer = v.priceUnit === fu ? v.price : (fu === 'L' ? v.price / L_PER_GAL : v.price * L_PER_GAL);
-        const fuel = bu * pts * v.use;
-        const fuelCost = fuel * pricePer;
-        const other = bu * (v.other || 0);
-        total = fuelCost + other;
-        work = [
-          step('Points removed', 'Mi − Mf', `${n(v.mi)} − ${n(v.mf)}`, `${n(pts)} pts`),
-          step('Fuel used', 'B × pts × F', `${n(bu)} × ${n(pts)} × ${n(v.use, 4)}`, `${n(fuel)} ${fu}`),
-          step('Fuel cost', 'fuel × P', `${n(fuel)} × ${m(pricePer, ctx, 3)}/${fu}`, m(fuelCost, ctx)),
-        ];
-        if (other > 0) work.push(step('Electric & other', 'B × E', `${n(bu)} × ${m(v.other, ctx, 3)}`, m(other, ctx)));
-        work.push(step('Total cost', other > 0 ? 'fuel cost + other' : 'fuel cost', other > 0 ? `${m(fuelCost, ctx)} + ${m(other, ctx)}` : m(fuelCost, ctx), m(total, ctx), true));
-        results.push({ label: 'Fuel used', value: fuel, unit: fu });
-      }
-      return {
-        results: [
-          { label: 'Cost per bushel', value: total / bu, money: true, decimals: 3, unit: '/bu', primary: true },
-          { label: 'Total drying cost', value: total, money: true },
-          { label: 'Cost per point per bu', value: total / bu / pts, money: true, decimals: 4 },
-          ...results,
-        ],
-        work,
+        notes: [`Water shrink at ${n(mf)}% = 100 ÷ (100 − ${n(mf)}) = ${pctStr(100 / (100 - mf), 3)} per point.`],
       };
     },
   },
 
   {
     id: 'moisture-shrink',
-    summary: ['Shrink', 'Net check'],   // supporting results on a notebook summary card
-    title: 'Moisture Shrink & Discount',
+    title: 'Moisture Shrink',
     category: 'drying',
-    desc: 'Elevator shrink, drying charges and net value for wet grain.',
+    desc: 'Bushels you get paid for after the elevator’s moisture shrink.',
     fields: [
       crop,
       { name: 'gross', label: 'Delivered (wet)', sym: 'G', dim: 'grain', def: 1000 },
       { name: 'moist', label: 'Moisture', sym: 'M', unit: '%', def: 18, cropDefault: 'harvest' },
       { name: 'base', label: 'Base moisture', sym: 'Mb', unit: '%', def: 15.5, cropDefault: 'moist' },
       { name: 'factor', label: 'Shrink per point', sym: 'S', unit: '%', def: 1.4, help: 'Elevator shrink factor, often 1.3–1.5%' },
-      { name: 'charge', label: 'Drying charge per point', sym: 'C', money: true, unit: '/bu', def: 0.04, optional: true },
-      { name: 'price', label: 'Cash price', sym: 'P', dim: 'grainPrice', def: 6, cropDefault: 'price', optional: true },
     ],
     compute(v, ctx) {
-      const tw = ctx.tw, gBu = v.gross / tw;
+      const gBu = v.gross / ctx.tw;
       const pts = Math.max(0, v.moist - v.base);
-      const shrink = pts * v.factor;
-      const netBu = gBu * (1 - shrink / 100);
-      const shrinkBu = gBu - netBu;
-      const charge = gBu * pts * (v.charge || 0);
-      const work = [
-        step('Points over base', 'M − Mb', `${n(v.moist)} − ${n(v.base)}`, `${n(pts)} pts`),
-        step('Shrink', 'pts × S', `${n(pts)} × ${n(v.factor)}%`, pctStr(shrink, 2)),
-        step('Net bushels', 'G × (1 − shrink)', `${n(gBu)} × (1 − ${n(shrink / 100, 4)})`, `${n(netBu)} bu`, !v.price),
-      ];
-      const results = [
-        { label: 'Net (paid) grain', value: netBu * tw, dim: 'grain', primary: true },
-        { label: 'Shrink', value: shrinkBu * tw, dim: 'grain' },
-        { label: 'Shrink %', value: shrink, unit: '%' },
-      ];
-      if (charge > 0) {
-        work.push(step('Drying charge', 'G × pts × C', `${n(gBu)} × ${n(pts)} × ${m(v.charge, ctx, 3)}`, m(charge, ctx)));
-        results.push({ label: 'Drying charge', value: charge, money: true });
-      }
-      if (v.price) {
-        const value = netBu * v.price;
-        const net = value - charge;
-        work.push(step('Net check', 'net bu × P − charge', `${n(netBu)} × ${m(v.price, ctx)} − ${m(charge, ctx)}`, m(net, ctx), true));
-        results.push({ label: 'Grain value', value, money: true }, { label: 'Net check', value: net, money: true }, { label: 'Net price per wet bu', value: net / gBu, money: true, decimals: 3 });
-      }
-      const water = (v.moist - v.base) / (100 - v.base) * 100;
+      const netBu = gBu * (1 - pts * v.factor / 100);
+      const work = [pts > 0
+        ? step('Net bushels', 'G × [1 − (M − Mb) × S]', `${n(gBu)} × [1 − (${n(v.moist)} − ${n(v.base)}) × ${n(v.factor)}%]`, `${n(netBu)} bu`, true)
+        : step('Net bushels', 'G (at or below base moisture)', `${n(gBu)}`, `${n(netBu)} bu`, true)];
       return {
-        results, work,
-        notes: pts > 0 ? [`True water-only shrink would be ${pctStr(water, 2)}; the rest is the elevator's handling margin.`] : ['Grain is at or below base moisture; no shrink.'],
+        results: [{ label: 'Net (paid) grain', value: netBu * ctx.tw, dim: 'grain', primary: true }],
+        work,
+        notes: pts > 0 ? [] : ['Grain is at or below base moisture; no shrink.'],
         links: [{ calc: 'grain-drying', label: 'Dry it yourself', values: { crop: v.crop, wet: v.gross, mi: v.moist, mf: v.base } }],
       };
     },
@@ -812,12 +712,10 @@ const RATING = {
   westeel: { angle: 30, pack: 5, name: 'Westeel rating' },
   sukup: { angle: 28, pack: 6, name: 'Sukup rating' },
 };
-const GAL_PER_FT3 = 7.48051948;
 
 __exp.default = [
   {
     id: 'bin-capacity',
-    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Bin Volume',
     category: 'storage',
     desc: 'Bushels in a round bin: level, peaked and hopper bottom.',
@@ -869,62 +767,35 @@ __exp.default = [
       const theta = R ? R.angle : v.repose;
       const packPct = R ? R.pack : (v.pack || 0);
       const base = Math.PI * r * r;
-      const cyl = base * H;
-      let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
-      const work = [];
-      if (v.hUnit === 'ring') {
-        const rings = H / (ctx.ringIn / 12);
-        work.push(step('Sidewall height', 'rings × ring height', `${n(rings)} × ${n(ctx.ringIn)}″`, `${n(H)} ft`));
-      }
-      work.push(
-        step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
-        step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
-      );
-      if (top === 'peak') {
-        peakH = r * Math.tan(deg(theta));
-        peak = base * peakH / 3;
-        work.push(step(R ? `Peak cone (${n(theta)}°)` : 'Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
-      }
-      if (top === 'funnel') {
-        // grain pulled from the center leaves an upside-down cone: subtract it
-        funH = r * Math.tan(deg(theta));
-        if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
-        funnel = base * funH / 3;
-        work.push(step('Funnel (inverted cone)', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(funH)} ÷ 3`, `${n(funnel)} ft³`));
-      }
-      if (v.bottom === 'hopper') {
-        hopH = r * Math.tan(deg(v.hopper));
-        hop = base * hopH / 3;
-        work.push(step('Hopper cone', 'area × (r × tan α) ÷ 3', `${n(base)} × ${n(hopH)} ÷ 3`, `${n(hop)} ft³`));
-      }
-      const ft3 = cyl + peak + hop - funnel;          // physical volume
-      // packing (compaction) settles the grain in the walls; manufacturers apply it to the cylinder only
       const packF = 1 + packPct / 100;
-      const cylP = cyl * packF;
-      if (packF > 1) work.push(step(R ? `Packed walls (${n(packPct)}%)` : 'Packed walls', 'cyl × (1 + k)', `${n(cyl)} × ${n(packF, 3)}`, `${n(cylP)} ft³`));
-      const eq = cylP + peak + hop - funnel;          // grain-equivalent volume
-      const bu = eq * BU_PER_FT3;
-      // "cyl + peak + hopper − funnel", written out with whichever parts apply
-      const parts = [[packF > 1 ? 'packed' : 'cyl', cylP, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
-      if (parts.length > 1) {
-        const f = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + p[0]).join('');
-        const s = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + n(p[1])).join('');
-        work.push(step('Total', f, s, `${n(eq)} ft³`));
-      }
-      work.push(step('Bushels', 'ft³ × 0.8036', `${n(eq)} × 0.8036`, `${n(bu)} bu`, true));
+      const ring = v.hUnit === 'ring';
+      const ringFt = ctx.ringIn / 12, rings = H / ringFt;
+      const tan = a => r * Math.tan(deg(a));
+      const peakH = top === 'peak' ? tan(theta) : 0;
+      const funH = top === 'funnel' ? tan(theta) : 0;
+      const hopH = v.bottom === 'hopper' ? tan(v.hopper) : 0;
+      if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
+      // bushels = π r² × (wall height × packing + peak ÷ 3 + hopper ÷ 3 − funnel ÷ 3) × 0.8036
+      const depth = H * packF + peakH / 3 + hopH / 3 - funH / 3;
+      const bu = base * depth * BU_PER_FT3;
+      const terms = [[(ring ? 'rings × Rh' : 'H') + (packF > 1 ? ' × k' : ''), (ring ? `${n(rings)} × ${n(ringFt, 3)}` : n(H)) + (packF > 1 ? ` × ${n(packF, 3)}` : ''), '+']];
+      if (peakH) terms.push(['hp ÷ 3', `${n(peakH)} ÷ 3`, '+']);
+      if (hopH) terms.push(['hh ÷ 3', `${n(hopH)} ÷ 3`, '+']);
+      if (funH) terms.push(['hf ÷ 3', `${n(funH)} ÷ 3`, '−']);
+      const join = k => terms.map((t, i) => (i ? ` ${t[2]} ` : '') + t[k]).join('');
+      const wrap = x => (terms.length > 1 ? `(${x})` : x);
+      const work = [step('Bushels', `π × r² × ${wrap(join(0))} × 0.8036`, `π × ${n(r)}² × ${wrap(join(1))} × 0.8036`, `${n(bu)} bu`, true)];
+      const notes = [];
+      if (ring) notes.push(`Rh = ${n(ctx.ringIn)}″ ring = ${n(ringFt, 3)} ft.`);
+      if (packF > 1) notes.push(`k = ${n(packPct)}% packing in the walls.`);
+      if (peakH) notes.push(`hp = peak height = r × tan ${n(theta)}° = ${n(peakH)} ft.`);
+      if (hopH) notes.push(`hh = hopper depth = r × tan ${n(v.hopper)}° = ${n(hopH)} ft.`);
+      if (funH) notes.push(`hf = funnel depth = r × tan ${n(theta)}° = ${n(funH)} ft.`);
+      notes.push(R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.');
       return {
-        results: [
-          { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
-          { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
-          ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
-          ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * ctx.tw, dim: 'grain' }] : []),
-          ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
+        results: [{ label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true }],
         work,
-        notes: [R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
+        notes,
         links: [{ calc: 'grain-drying', label: 'Grain drying', values: { crop: v.crop, wet: bu * ctx.tw } }],
       };
     },
@@ -932,7 +803,6 @@ __exp.default = [
 
   {
     id: 'grain-pile',
-    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Grain Pile Volume',
     category: 'storage',
     desc: 'Bushels in a cone pile or a long ridge pile on the ground.',
@@ -946,46 +816,30 @@ __exp.default = [
     ],
     compute(v, ctx) {
       const t = Math.tan(deg(v.repose));
-      let ft3, h, work;
+      let bu, work, h;
       if (v.shape === 'ridge') {
         const r = v.w / 2;
         if (v.len < v.w) return fail('Length must be at least the width for a ridge pile.');
         h = r * t;
-        const mid = (v.w * h / 2) * (v.len - v.w);
-        const ends = Math.PI * r * r * h / 3;
-        ft3 = mid + ends;
-        work = [
-          step('Height', '(W ÷ 2) × tan θ', `${n(r)} × tan ${n(v.repose)}°`, `${n(h)} ft`),
-          step('Middle (prism)', '(W × h ÷ 2) × (L − W)', `(${n(v.w)} × ${n(h)} ÷ 2) × (${n(v.len)} − ${n(v.w)})`, `${n(mid)} ft³`),
-          step('Two half-cone ends', 'π × r² × h ÷ 3', `3.1416 × ${n(r)}² × ${n(h)} ÷ 3`, `${n(ends)} ft³`),
-          step('Bushels', '(prism + ends) × 0.8036', `${n(ft3)} × 0.8036`, `${n(ft3 * BU_PER_FT3)} bu`, true),
-        ];
+        // a prism in the middle plus two half-cone ends (one whole cone)
+        bu = h * (v.w * (v.len - v.w) / 2 + Math.PI * r * r / 3) * BU_PER_FT3;
+        work = [step('Bushels', 'h × [W × (L − W) ÷ 2 + π × r² ÷ 3] × 0.8036', `${n(h)} × [${n(v.w)} × (${n(v.len)} − ${n(v.w)}) ÷ 2 + π × ${n(r)}² ÷ 3] × 0.8036`, `${n(bu)} bu`, true)];
       } else {
         const r = v.dia / 2;
         h = r * t;
-        ft3 = Math.PI * r * r * h / 3;
-        work = [
-          step('Height', 'r × tan θ', `${n(r)} × tan ${n(v.repose)}°`, `${n(h)} ft`),
-          step('Cone volume', 'π × r² × h ÷ 3', `3.1416 × ${n(r)}² × ${n(h)} ÷ 3`, `${n(ft3)} ft³`),
-          step('Bushels', 'ft³ × 0.8036', `${n(ft3)} × 0.8036`, `${n(ft3 * BU_PER_FT3)} bu`, true),
-        ];
+        bu = Math.PI * r * r * h / 3 * BU_PER_FT3;
+        work = [step('Bushels', 'π × r² × h ÷ 3 × 0.8036', `π × ${n(r)}² × ${n(h)} ÷ 3 × 0.8036`, `${n(bu)} bu`, true)];
       }
-      const bu = ft3 * BU_PER_FT3;
       return {
-        results: [
-          { label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Pile height', value: h, dim: 'length', unitSet: ['ft', 'm'] },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
-          { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
+        results: [{ label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true }],
         work,
+        notes: [`h = pile height = ${v.shape === 'ridge' ? 'W ÷ 2' : 'r'} × tan ${n(v.repose)}° = ${n(h)} ft.`],
       };
     },
   },
 
   {
     id: 'truck-load',
-    summary: ['Net tons'],   // supporting results on a notebook summary card
     title: 'Truck / Wagon Load',
     category: 'storage',
     desc: 'Scale ticket weights to net bushels and tons.',
@@ -999,15 +853,8 @@ __exp.default = [
       if (net <= 0) return fail('Gross weight must be more than tare weight.');
       const bu = net / ctx.tw;
       return {
-        results: [
-          { label: 'Net grain', value: net, dim: 'grain', primary: true },
-          { label: 'Net weight', value: net, dim: 'mass' },
-          { label: 'Net tons', value: net, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
-        work: [
-          step('Net weight', 'G − T', `${n(v.gross)} − ${n(v.tare)}`, `${n(net)} lb`),
-          step('Bushels', 'net ÷ test wt', `${n(net)} ÷ ${n(ctx.tw)} lb/bu`, `${n(bu)} bu`, true),
-        ],
+        results: [{ label: 'Net grain', value: net, dim: 'grain', primary: true }],
+        work: [step('Bushels', '(G − T) ÷ test wt', `(${n(v.gross)} − ${n(v.tare)}) ÷ ${n(ctx.tw)} lb/bu`, `${n(bu)} bu`, true)],
         links: [{ calc: 'moisture-shrink', label: 'Moisture shrink', values: { crop: v.crop, gross: net } }],
       };
     },
@@ -1030,7 +877,6 @@ const G_PER_LB = 453.592;
 __exp.default = [
   {
     id: 'canola-yield',
-    summary: [],   // supporting results on a notebook summary card
     title: 'Canola Yield Estimate',
     category: 'yield',
     crop: 'canola',
@@ -1045,27 +891,15 @@ __exp.default = [
     compute(v, ctx) {
       if (!(v.tsw > 0)) return fail('Thousand-seed weight must be more than zero.');
       const pFt2 = v.plants / 43560;               // base is plants per acre
-      const seedsFt2 = pFt2 * v.pods * v.spp;
-      const seedsLb = G_PER_LB * 1000 / v.tsw;
-      const lbAc = seedsFt2 * 43560 / seedsLb;
-      const lossPct = v.loss || 0;
-      const netLb = lbAc * (1 - lossPct / 100);
-      const bu = netLb / ctx.tw;
-      const work = [
-        step('Seeds per ft²', 'P × Po × Sp', `${n(pFt2, 2)} × ${n(v.pods)} × ${n(v.spp)}`, `${n(seedsFt2)}`),
-        step('Seeds per lb', '453,592 ÷ TSW', `453,592 ÷ ${n(v.tsw, 2)}`, `${n(seedsLb)}`),
-        step('Pounds per acre', 'seeds/ft² × 43,560 ÷ seeds/lb', `${n(seedsFt2)} × 43,560 ÷ ${n(seedsLb)}`, `${n(lbAc)} lb/ac`),
-      ];
-      if (lossPct) work.push(step('After losses', 'lb/ac × (1 − L)', `${n(lbAc)} × (1 − ${n(lossPct / 100, 3)})`, `${n(netLb)} lb/ac`));
-      work.push(step('Yield', `lb/ac ÷ ${n(ctx.tw)} lb/bu`, `${n(netLb)} ÷ ${n(ctx.tw)}`, `${n(bu, 1)} bu/ac`, true));
+      const L = (v.loss || 0) / 100;
+      // lb/ac = seeds per ft² × 43,560 ft² × grams per seed ÷ 453.592 g/lb
+      const lbAc = pFt2 * v.pods * v.spp * v.tsw / 1000 * 43560 / G_PER_LB * (1 - L);
+      const bu = lbAc / ctx.tw;
+      const f = 'P × Po × Sp × TSW × 43,560 ÷ 453,592' + (L ? ' × (1 − L)' : '') + ' ÷ test wt';
+      const sub = `${n(pFt2, 2)} × ${n(v.pods)} × ${n(v.spp)} × ${n(v.tsw, 2)} × 43,560 ÷ 453,592` + (L ? ` × (1 − ${n(L * 100)}%)` : '') + ` ÷ ${n(ctx.tw)}`;
       return {
-        results: [
-          { label: 'Estimated yield', value: netLb, dim: 'grainYield', primary: true },
-          { label: 'Plants per ft²', value: pFt2, unit: 'plants/ft²', decimals: 1 },
-          { label: 'Seeds per ft²', value: seedsFt2, unit: 'seeds/ft²', decimals: 0 },
-          { label: 'Seeds per lb', value: seedsLb, unit: 'seeds/lb', decimals: 0 },
-        ],
-        work,
+        results: [{ label: 'Estimated yield', value: lbAc, dim: 'grainYield', primary: true }],
+        work: [step('Yield', f, sub, `${n(bu, 1)} bu/ac`, true)],
         notes: ['Count several spots and average. Pre-harvest estimates often run high; a 5–15% loss allowance is common.'],
       };
     },
@@ -1073,7 +907,6 @@ __exp.default = [
 
   {
     id: 'wheat-yield',
-    summary: [],   // supporting results on a notebook summary card
     title: 'Wheat Yield Estimate',
     category: 'yield',
     crop: 'wheat',
@@ -1088,21 +921,11 @@ __exp.default = [
     compute(v, ctx) {
       const area = v.len * v.rw;
       if (area <= 0) return fail('Enter a row width and length.');
-      const hpf = v.heads / area;
-      const headsAc = hpf * 43560;
-      const lb = headsAc * v.kph / v.kpl;
-      const bu = lb / 60;
+      const lb = v.heads / area * 43560 * v.kph / v.kpl;
+      const bu = lb / ctx.tw;
       return {
-        results: [
-          { label: 'Estimated yield', value: bu * ctx.tw, dim: 'grainYield', primary: true },
-          { label: 'Heads per ft²', value: hpf, unit: 'heads/ft²' },
-          { label: 'Heads per acre', value: headsAc, dim: 'countRate' },
-        ],
-        work: [
-          step('Area counted', 'L × R', `${n(v.len)} ft × ${n(v.rw, 3)} ft`, `${n(area, 3)} ft²`),
-          step('Heads per ft²', 'H ÷ area', `${n(v.heads)} ÷ ${n(area, 3)}`, `${n(hpf, 1)}`),
-          step('Yield', 'heads/ft² × 43,560 × Kh ÷ Kl ÷ 60', `${n(hpf, 1)} × 43,560 × ${n(v.kph)} ÷ ${n(v.kpl)} ÷ 60`, `${n(bu, 1)} bu/ac`, true),
-        ],
+        results: [{ label: 'Estimated yield', value: lb, dim: 'grainYield', primary: true }],
+        work: [step('Yield', 'H ÷ (L × R) × 43,560 × Kh ÷ Kl ÷ test wt', `${n(v.heads)} ÷ (${n(v.len)} ft × ${n(v.rw, 3)} ft) × 43,560 × ${n(v.kph)} ÷ ${n(v.kpl)} ÷ ${n(ctx.tw)}`, `${n(bu, 1)} bu/ac`, true)],
       };
     },
   },
@@ -1126,24 +949,12 @@ __exp.default = [
       if (v.std >= 100 || v.moist >= 100) return fail('Moisture must be below 100%.');
       const area = v.method === 'strip' ? v.len * v.w / 43560 : v.area;
       if (!(area > 0)) return fail('Area must be more than zero.');
-      const dry = v.wt * (100 - v.moist) / (100 - v.std);
-      const dryBu = dry / ctx.tw;
-      const yld = dryBu / area;
-      const work = [];
-      if (v.method === 'strip') work.push(step('Area', 'L × Wh ÷ 43,560', `${n(v.len)} × ${n(v.w)} ÷ 43,560`, `${n(area, 3)} ac`));
-      work.push(
-        step('Dry weight', 'W × (100 − M) ÷ (100 − Ms)', `${n(v.wt)} × (100 − ${n(v.moist)}) ÷ (100 − ${n(v.std)})`, `${n(dry)} lb`),
-        step('Dry bushels', 'dry wt ÷ test wt', `${n(dry)} ÷ ${n(ctx.tw)}`, `${n(dryBu)} bu`),
-        step('Yield', 'dry bu ÷ area', `${n(dryBu)} ÷ ${n(area, 3)} ac`, `${n(yld, 1)} bu/ac`, true),
-      );
+      const yld = v.wt * (100 - v.moist) / (100 - v.std) / ctx.tw / area;
+      const strip = v.method === 'strip';
+      const A = strip ? '(L × Wh ÷ 43,560)' : 'A', As = strip ? `(${n(v.len)} × ${n(v.w)} ÷ 43,560)` : `${n(area, 3)} ac`;
       return {
-        results: [
-          { label: 'Dry yield', value: yld * ctx.tw, dim: 'grainYield', primary: true },
-          { label: 'Dry grain', value: dry, dim: 'grain' },
-          { label: 'Wet grain', value: v.wt, dim: 'grain' },
-          { label: 'Area', value: area, dim: 'area' },
-        ],
-        work,
+        results: [{ label: 'Dry yield', value: yld * ctx.tw, dim: 'grainYield', primary: true }],
+        work: [step('Yield', `W × (100 − M) ÷ (100 − Ms) ÷ test wt ÷ ${A}`, `${n(v.wt)} lb × (100 − ${n(v.moist)}) ÷ (100 − ${n(v.std)}) ÷ ${n(ctx.tw)} ÷ ${As}`, `${n(yld, 1)} bu/ac`, true)],
       };
     },
   },
@@ -1155,7 +966,6 @@ return __exp;
 __mods['js/calcs/fieldops.js'] = (function () {
 const __exp = {};
 const { n, step, fail } = __mods['js/calcs/_h.js'];
-const FIELD_LEN = ['ft', 'yd', 'rod', 'mi', 'm', 'km'];
 // Typical rated flow of gas trash pumps by outlet size (US gpm, near zero lift).
 // From manufacturer listings: 2" ≈ 140–210, 3" ≈ 225–400, 4" ≈ 500, 6" ≈ 1,000–1,300.
 // We use the middle of each range and interpolate; outside 2–6" flow scales ≈ size^1.7.
@@ -1180,7 +990,7 @@ const SHAPES = { saucer: 1 / 3, bowl: 0.5, flat: 0.8 };
 __exp.default = [
   {
     id: 'field-productivity',
-    summary: ['Per day'],   // supporting results on a notebook summary card
+    summary: [],   // the inputs and the one answer are the whole calc
     title: 'Field Productivity',
     category: 'fieldops',
     desc: 'Acres per hour from implement width, speed and field efficiency.',
@@ -1188,125 +998,34 @@ __exp.default = [
       { name: 'w', label: 'Implement width', sym: 'W', dim: 'length', unitSet: ['ft', 'm'], def: 40, defMetric: 12 },
       { name: 'speed', label: 'Ground speed', sym: 'S', dim: 'speed', def: 6, defMetric: 10, defSk: 9 },
       { name: 'eff', label: 'Field efficiency', sym: 'E', unit: '%', def: 75, help: 'Tillage 80–90% · Planting 60–75% · Spraying 55–70% · Combine 65–80%' },
-      { name: 'hours', label: 'Hours per day', sym: 'h', unit: 'hr', def: 10, optional: true },
     ],
     compute(v) {
       if (v.eff <= 0 || v.eff > 100) return fail('Efficiency should be between 1 and 100%.');
-      const theo = v.w * v.speed / 8.25;
-      const eff = theo * v.eff / 100;
-      const results = [
-        { label: 'Effective capacity', value: eff, dim: 'areaRate', primary: true },
-        { label: 'Theoretical capacity', value: theo, dim: 'areaRate' },
-      ];
+      const eff = v.w * v.speed * (v.eff / 100) / 8.25;
+      const results = [{ label: 'Productivity', value: eff, dim: 'areaRate', primary: true }];
       const work = [
-        step('Theoretical', 'W × S ÷ 8.25', `${n(v.w)} ft × ${n(v.speed)} mph ÷ 8.25`, `${n(theo)} ac/hr`),
-        step('Effective', 'theoretical × E', `${n(theo)} × ${n(v.eff)}%`, `${n(eff)} ac/hr`, !v.hours),
+        step('Productivity', 'W × S × E ÷ 8.25', `${n(v.w)} ft × ${n(v.speed)} mph × ${n(v.eff)}% ÷ 8.25`, `${n(eff)} ac/hr`, true),
       ];
-      if (v.hours) {
-        results.push({ label: 'Per day', value: eff * v.hours, dim: 'area' });
-        work.push(step('Per day', 'effective × h', `${n(eff)} × ${n(v.hours)} hr`, `${n(eff * v.hours)} ac`, true));
-      }
       return {
         results, work,
         notes: ['8.25 = 43,560 ft²/ac ÷ 5,280 ft/mi.'],
-        links: [{ calc: 'time-to-finish', label: 'Time to finish', values: { cap: eff, hpd: v.hours || 10 } }],
       };
     },
   },
 
   {
-    id: 'field-area',
-    title: 'Field Area',
+    id: 'speedometer',
+    title: 'Speedometer',
     category: 'fieldops',
-    desc: 'Acres for rectangles, triangles, trapezoids and center pivots.',
-    fields: [
-      {
-        name: 'shape', label: 'Shape', type: 'select', def: 'rect', options: [
-          { value: 'rect', label: 'Rectangle' }, { value: 'tri', label: 'Triangle (3 sides)' },
-          { value: 'trap', label: 'Trapezoid' }, { value: 'pivot', label: 'Center pivot / circle' },
-        ],
-      },
-      { name: 'l', label: 'Length', sym: 'L', dim: 'length', unitSet: FIELD_LEN, def: 2640, defMetric: 800, show: v => v.shape === 'rect' },
-      { name: 'w', label: 'Width', sym: 'W', dim: 'length', unitSet: FIELD_LEN, def: 1320, defMetric: 400, show: v => v.shape === 'rect' },
-      { name: 'a', label: 'Side a', sym: 'a', dim: 'length', unitSet: FIELD_LEN, def: 1320, defMetric: 400, show: v => v.shape === 'tri' },
-      { name: 'b', label: 'Side b', sym: 'b', dim: 'length', unitSet: FIELD_LEN, def: 1320, defMetric: 400, show: v => v.shape === 'tri' },
-      { name: 'c', label: 'Side c', sym: 'c', dim: 'length', unitSet: FIELD_LEN, def: 1867, defMetric: 566, show: v => v.shape === 'tri' },
-      { name: 't1', label: 'Parallel side 1', sym: 'a', dim: 'length', unitSet: FIELD_LEN, def: 1320, defMetric: 400, show: v => v.shape === 'trap' },
-      { name: 't2', label: 'Parallel side 2', sym: 'b', dim: 'length', unitSet: FIELD_LEN, def: 900, defMetric: 270, show: v => v.shape === 'trap' },
-      { name: 'th', label: 'Distance between', sym: 'h', dim: 'length', unitSet: FIELD_LEN, def: 1320, defMetric: 400, show: v => v.shape === 'trap' },
-      { name: 'r', label: 'Radius (pivot length)', sym: 'r', dim: 'length', unitSet: FIELD_LEN, def: 1300, defMetric: 400, show: v => v.shape === 'pivot' },
-      { name: 'arc', label: 'Sweep', sym: '∠', unit: '°', def: 360, show: v => v.shape === 'pivot', help: '360° full circle, 180° half pivot' },
-    ],
-    compute(v) {
-      let ft2, work;
-      if (v.shape === 'rect') {
-        ft2 = v.l * v.w;
-        work = [step('Area', 'L × W', `${n(v.l)} × ${n(v.w)}`, `${n(ft2)} ft²`)];
-      } else if (v.shape === 'tri') {
-        const s = (v.a + v.b + v.c) / 2;
-        const q = s * (s - v.a) * (s - v.b) * (s - v.c);
-        if (q <= 0) return fail('Those three sides can’t form a triangle.');
-        ft2 = Math.sqrt(q);
-        work = [
-          step('Half perimeter', '(a + b + c) ÷ 2', `(${n(v.a)} + ${n(v.b)} + ${n(v.c)}) ÷ 2`, `${n(s)}`),
-          step('Area (Heron)', '√(s(s−a)(s−b)(s−c))', `√(${n(s)} × ${n(s - v.a)} × ${n(s - v.b)} × ${n(s - v.c)})`, `${n(ft2)} ft²`),
-        ];
-      } else if (v.shape === 'trap') {
-        ft2 = (v.t1 + v.t2) / 2 * v.th;
-        work = [step('Area', '(a + b) ÷ 2 × h', `(${n(v.t1)} + ${n(v.t2)}) ÷ 2 × ${n(v.th)}`, `${n(ft2)} ft²`)];
-      } else {
-        const frac = Math.min(360, Math.max(0, v.arc)) / 360;
-        ft2 = Math.PI * v.r * v.r * frac;
-        work = [step('Area', frac < 1 ? 'π × r² × (∠ ÷ 360)' : 'π × r²', frac < 1 ? `3.1416 × ${n(v.r)}² × ${n(frac, 3)}` : `3.1416 × ${n(v.r)}²`, `${n(ft2)} ft²`)];
-      }
-      const ac = ft2 / 43560;
-      work.push(step('Acres', 'ft² ÷ 43,560', `${n(ft2)} ÷ 43,560`, `${n(ac)} ac`, true));
-      const results = [
-        { label: 'Area', value: ac, dim: 'area', primary: true },
-        { label: 'Square feet', value: ac, dim: 'area', units: { us: 'ft2', metric: 'm2' }, unitSet: ['ft2', 'm2'] },
-      ];
-      if (v.shape === 'pivot' && v.arc >= 360) {
-        const square = (2 * v.r) ** 2 / 43560;
-        results.push({ label: 'Corners (square − circle)', value: square - ac, dim: 'area' });
-      }
-      return { results, work };
-    },
+    desc: 'Your real ground speed from the phone’s GPS. Tap the unit to change it.',
+    widget: 'gps',     // the whole page is the live GPS readout (js/speedo.js)
+    toolOnly: true,    // no inputs, results or notebook entry
+    fields: [],
+    compute() { return { results: [], work: [] }; },
   },
 
-  {
-    id: 'time-to-finish',
-    summary: ['As hours & minutes', 'Working days'],   // supporting results on a notebook summary card
-    title: 'Time to Finish',
-    category: 'fieldops',
-    desc: 'Hours and days left to cover the remaining acres.',
-    fields: [
-      { name: 'acres', label: 'Acres remaining', sym: 'A', dim: 'area', def: 640, defMetric: 250 },
-      { name: 'cap', label: 'Effective capacity', sym: 'C', dim: 'areaRate', def: 22, defMetric: 9 },
-      { name: 'hpd', label: 'Hours per day', sym: 'h', unit: 'hr', def: 10 },
-      { name: 'machines', label: 'Machines running', sym: 'N', unit: '', def: 1, optional: true },
-    ],
-    compute(v) {
-      const N = v.machines || 1;
-      if (!(v.cap > 0)) return fail('Capacity must be more than zero.');
-      const hours = v.acres / (v.cap * N);
-      const days = hours / v.hpd;
-      const hh = Math.floor(hours), mm = Math.round((hours - hh) * 60);
-      return {
-        results: [
-          { label: 'Time needed', value: hours, unit: 'hr', primary: true },
-          { label: 'As hours & minutes', text: `${hh} h ${mm} m` },
-          { label: 'Working days', value: days, unit: 'days', decimals: 1 },
-        ],
-        work: [
-          step('Hours', N > 1 ? 'A ÷ (C × N)' : 'A ÷ C', N > 1 ? `${n(v.acres)} ÷ (${n(v.cap)} × ${N})` : `${n(v.acres)} ÷ ${n(v.cap)}`, `${n(hours)} hr`),
-          step('Days', 'hours ÷ h', `${n(hours)} ÷ ${n(v.hpd)}`, `${n(days, 1)} days`, true),
-        ],
-      };
-    },
-  },
   {
     id: 'slough-pumping',
-    summary: ['Water volume', 'Pump rate'],   // supporting results on a notebook summary card
     title: 'Slough Pumping',
     category: 'fieldops',
     desc: 'How much water is in a slough and how many hours your pump needs to drain it.',
@@ -1323,43 +1042,25 @@ __exp.default = [
       { name: 'outlet', label: 'Pump outlet size', sym: 'Ø', unit: 'in', def: 3, help: v => (v.outlet > 0 ? `Typical rating ≈ ${n(pumpGpmFromOutlet(v.outlet), 0)} US gpm (${n(pumpGpmFromOutlet(v.outlet) * 60, 0)} gph)` : 'Discharge size, e.g. 2, 3, 4 or 6') },
       { name: 'rated', label: 'Rated flow (if known)', sym: 'Q', dim: 'flow', unitSet: ['gpm', 'gph', 'lpm'], def: null, optional: true, help: 'From the pump plate or manual; leave blank to estimate from outlet size' },
       { name: 'eff', label: 'Real-world flow', sym: 'E', unit: '%', def: 65, help: 'Lift, hose length and debris cut flow; 50–80% of rating is typical' },
-      { name: 'hpd', label: 'Hours pumping per day', sym: 'h', unit: 'hr', def: null, optional: true },
     ],
     compute(v) {
       const factor = SHAPES[v.shape] || 0.5;
       const ft2 = v.mode === 'area' ? v.area * 43560 : Math.PI / 4 * v.len * v.wid;
       if (!(ft2 > 0) || !(v.depth > 0)) return fail('Enter the slough size and depth.');
-      const ft3 = ft2 * v.depth * factor;
-      const gal = ft3 * 7.48051948;
+      const gal = ft2 * v.depth * factor * 7.48051948;
       const ratedGpm = v.rated || pumpGpmFromOutlet(v.outlet);
       if (!(ratedGpm > 0)) return fail('Enter the pump outlet size or its rated flow.');
       if (!(v.eff > 0)) return fail('Real-world flow must be more than 0%.');
-      const gph = ratedGpm * 60 * v.eff / 100;
-      const hours = gal / gph;
-      const hh = Math.floor(hours), mm = Math.round((hours - hh) * 60);
-      const work = [];
-      if (v.mode === 'area') work.push(step('Surface area', 'acres × 43,560', `${n(v.area, 2)} × 43,560`, `${n(ft2)} ft²`));
-      else work.push(step('Surface area (oval)', 'π ÷ 4 × L × W', `0.7854 × ${n(v.len)} × ${n(v.wid)}`, `${n(ft2)} ft²`));
-      work.push(
-        step('Water volume', `area × D × ${v.shape === 'saucer' ? '⅓' : v.shape === 'flat' ? '0.8' : '½'} (${v.shape === 'flat' ? 'flat bottom' : v.shape})`, `${n(ft2)} × ${n(v.depth, 2)} × ${n(factor, 3)}`, `${n(ft3)} ft³`),
-        step('In gallons', 'ft³ × 7.48', `${n(ft3)} × 7.48`, `${n(gal)} gal`),
-        step('Pump rate', v.rated ? 'Q × 60 × E' : `${n(v.outlet)}″ pump ≈ ${n(ratedGpm, 0)} gpm × 60 × E`, `${n(ratedGpm, 0)} × 60 × ${n(v.eff)}%`, `${n(gph)} gph`),
-        step('Time to pump', 'gal ÷ gph', `${n(gal)} ÷ ${n(gph)}`, `${n(hours, 1)} hr`, !v.hpd),
-      );
-      const results = [
-        { label: 'Time to pump', value: hours, unit: 'hr', decimals: 1, primary: true },
-        { label: 'As hours & minutes', text: `${hh} h ${mm} m` },
-        { label: 'Water volume', value: gal, dim: 'volume', units: { us: 'gal', metric: 'L', sk: 'gal' }, unitSet: ['gal', 'L', 'm3', 'acft'] },
-        { label: 'Pump rate', value: gph / 60, dim: 'flow', units: { us: 'gph', metric: 'lph', sk: 'gph' }, unitSet: ['gph', 'gpm', 'lph', 'lpm'] },
-        { label: 'Surface area', value: ft2 / 43560, dim: 'area', decimals: 2 },
-      ];
-      if (v.hpd) {
-        results.push({ label: 'Days', value: hours / v.hpd, unit: 'days', decimals: 1 });
-        work.push(step('Days', 'hours ÷ h', `${n(hours, 1)} ÷ ${n(v.hpd)}`, `${n(hours / v.hpd, 1)} days`, true));
-      }
+      const hours = gal / (ratedGpm * 60 * v.eff / 100);
+      const fac = v.shape === 'saucer' ? '⅓' : v.shape === 'flat' ? '0.8' : '½';
+      const area = v.mode === 'area' ? ['A × 43,560', `${n(v.area, 2)} × 43,560`] : ['π ÷ 4 × L × W', `π ÷ 4 × ${n(v.len)} × ${n(v.wid)}`];
       return {
-        results, work,
-        notes: ['Gallons are US gallons, the same as pump ratings. Real flow drops with more lift and longer hose.'],
+        results: [{ label: 'Time to pump', value: hours, unit: 'hr', decimals: 1, primary: true }],
+        work: [step('Time to pump', `${area[0]} × D × ${fac} × 7.48 ÷ (Q × 60 × E)`, `${area[1]} × ${n(v.depth, 2)} × ${fac} × 7.48 ÷ (${n(ratedGpm, 0)} × 60 × ${n(v.eff)}%)`, `${n(hours, 1)} hr`, true)],
+        notes: [
+          `${fac} = ${v.shape === 'flat' ? 'flat bottom' : v.shape} shape; 7.48 US gal per ft³.${v.rated ? '' : ` Q ≈ ${n(ratedGpm, 0)} gpm for a ${n(v.outlet)}″ pump.`}`,
+          'Real flow drops with more lift and longer hose.',
+        ],
       };
     },
   },
@@ -1371,15 +1072,14 @@ return __exp;
 // ---- js/calcs/seeding.js ----
 __mods['js/calcs/seeding.js'] = (function () {
 const __exp = {};
-const { n, m, step, fail } = __mods['js/calcs/_h.js'];
+const { n, step, fail } = __mods['js/calcs/_h.js'];
 
 __exp.default = [
   {
     id: 'seeding-rate',
-    summary: ['Seeds to plant', 'Units per acre'],   // supporting results on a notebook summary card
     title: 'Seeding Rate',
     category: 'seeding',
-    desc: 'Target seeds (per ft², acre or m²) to lb/ac, bu/ac and seed units, adjusted for germination and purity.',
+    desc: 'Target seeds (per ft², acre or m²) to lb/ac, adjusted for germination and purity.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
       // seeds/ft² is how small-grain rates are usually given on the prairies; tap the unit for /ac, /m², /ha
@@ -1387,119 +1087,50 @@ __exp.default = [
       { name: 'germ', label: 'Germination', sym: 'G', unit: '%', def: 95 },
       { name: 'purity', label: 'Purity', sym: 'P', unit: '%', def: 100, optional: true, help: 'Pure seed % from the seed analysis/tag. The rest is chaff, weed seed or other crops. Certified seed is usually 98–99.9%' },
       { name: 'seedsLb', label: 'Seeds per lb', sym: 'S', unit: 'seeds/lb', def: 1600, cropDefault: 'seedsLb' },
-      { name: 'unitSize', label: 'Seeds per unit/bag', sym: 'U', unit: 'seeds', def: 80000, cropDefault: 'unit', optional: true, help: 'Corn 80,000 · Soybeans 140,000 · blank if sold by weight' },
-      { name: 'acres', label: 'Acres to plant', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
-    compute(v, ctx) {
-      const pls = v.germ / 100 * (v.purity || 100) / 100;
+    compute(v) {
+      const pur = v.purity && v.purity !== 100 ? v.purity : 0;
+      const pls = v.germ / 100 * (pur || 100) / 100;
       if (pls <= 0) return fail('Germination must be more than zero.');
-      const drop = v.target / pls;
-      const lbAc = drop / v.seedsLb;
-      const buAc = lbAc / ctx.tw;
-      const work = [];
-      // a target entered per ft², m² or ha is worked out per acre first
-      const per = { pft2: ['T × 43,560 ft²', 43560, ' × 43,560'], pm2: ['T × 4,046.9 m²', 4046.8564224, ' × 4,046.9'], pha: ['T ÷ 2.471 ac/ha', 1 / 2.4710538147, ' ÷ 2.471'] }[v.targetUnit];
-      if (per) work.push(step('Target per acre', per[0], `${n(v.target / per[1], 2)}${per[2]}`, `${n(v.target)} seeds/ac`));
-      work.push(
-        step('Pure live seed', v.purity && v.purity !== 100 ? 'G × P' : 'G', v.purity && v.purity !== 100 ? `${n(v.germ)}% × ${n(v.purity)}%` : `${n(v.germ)}%`, `${n(pls * 100, 2)}%`),
-        step('Seeds to plant', 'T ÷ PLS', `${n(v.target)} ÷ ${n(pls, 4)}`, `${n(drop)} seeds/ac`),
-        step('Pounds per acre', 'seeds ÷ S', `${n(drop)} ÷ ${n(v.seedsLb)}`, `${n(lbAc, 1)} lb/ac`, !v.unitSize),
-      );
-      const results = [
-        { label: 'Seeding rate', value: lbAc, dim: 'massRate', primary: true },
-        { label: 'Seeds to plant', value: drop, dim: 'countRate', units: { us: 'pft2', metric: 'pm2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'] },
-        { label: 'Bushels per acre', value: buAc, unit: 'bu/ac', decimals: 2 },
-      ];
-      if (v.unitSize) {
-        const uAc = drop / v.unitSize;
-        results.push({ label: 'Units per acre', value: uAc, unit: 'units/ac', decimals: 3 });
-        work.push(step('Units per acre', 'seeds ÷ U', `${n(drop)} ÷ ${n(v.unitSize)}`, `${n(uAc, 3)} units/ac`, !v.acres));
-        if (v.acres) {
-          const units = uAc * v.acres;
-          results.push({ label: 'Units for field', value: units, unit: 'units', decimals: 1 }, { label: 'Whole units to buy', value: Math.ceil(units), unit: 'units', decimals: 0 });
-          work.push(step('Units for field', 'units/ac × A', `${n(uAc, 3)} × ${n(v.acres)}`, `${n(units, 1)} units`, true));
-        }
-      } else if (v.acres) {
-        const lb = lbAc * v.acres;
-        results.push({ label: 'Seed for field', value: lb, dim: 'mass' }, { label: 'Bushels for field', value: lb / ctx.tw, unit: 'bu', decimals: 1 });
-        work.push(step('Seed for field', 'lb/ac × A', `${n(lbAc, 1)} × ${n(v.acres)}`, `${n(lb)} lb`, true));
-      }
-      return { results, work, links: [{ calc: 'seed-cost', label: 'Seed cost', values: { crop: v.crop, rate: drop, unitSize: v.unitSize || undefined, acres: v.acres || undefined } }] };
+      if (!(v.seedsLb > 0)) return fail('Seeds per lb must be more than zero.');
+      const lbAc = v.target / pls / v.seedsLb;     // target arrives per acre
+      // the target is written the way it was entered, then put on a per-acre basis
+      const per = { pft2: [' × 43,560', v.target / 43560], pm2: [' × 4,046.9', v.target / 4046.8564224], pha: [' ÷ 2.471', v.target * 2.4710538147] }[v.targetUnit] || ['', v.target];
+      const div = pur ? '(G × P)' : 'G';
+      const divS = pur ? `(${n(v.germ)}% × ${n(pur)}%)` : `${n(v.germ)}%`;
+      return {
+        results: [{ label: 'Seeding rate', value: lbAc, dim: 'massRate', primary: true }],
+        work: [step('Seeding rate', `T${per[0]} ÷ ${div} ÷ S`, `${n(per[1], 2)}${per[0]} ÷ ${divS} ÷ ${n(v.seedsLb)}`, `${n(lbAc, 1)} lb/ac`, true)],
+      };
     },
   },
 
   {
     id: 'plant-population',
-    summary: ['% of target'],   // supporting results on a notebook summary card
     title: 'Plant Population',
     category: 'seeding',
-    desc: 'Plants per acre from stand counts in a length of row.',
+    desc: 'Plants per area from stand counts in a length of row.',
     fields: [
       { name: 'rw', label: 'Row width', sym: 'R', dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'], def: 30, defMetric: 76, defSk: 10 },
       { name: 'len', label: 'Length of row counted', sym: 'L', dim: 'length', unitSet: ['ft', 'in', 'm', 'cm'], def: 17.42, defMetric: 5.3, defSk: 3, help: 'e.g. 3 ft of row; in 10" rows that is 2.5 ft²' },
       { name: 'plants', label: 'Plants counted (total)', sym: 'P', unit: 'plants', def: 34, defSk: 62, help: 'Tip: type 34+32+35 to add several counts' },
       { name: 'counts', label: 'Number of counts', sym: 'N', unit: '', def: 1 },
-      { name: 'target', label: 'Target population', sym: 'T', dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], def: 34000, defSk: 25, optional: true },
-    ],
-    compute(v) {
-      const areaFt2 = v.len * v.rw;
-      if (!(areaFt2 > 0) || !(v.counts > 0)) return fail('Row width, length and number of counts must be more than zero.');
-      const avg = v.plants / v.counts;
-      const pop = avg * 43560 / areaFt2;
-      const results = [
-        { label: 'Population', value: pop, dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], primary: true },
-        { label: 'Average per count', value: avg, unit: 'plants', decimals: 1 },
-        { label: 'Plant spacing', value: v.len / avg, dim: 'length', units: { us: 'in', metric: 'cm' }, unitSet: ['in', 'cm'] },
-      ];
-      const work = [
-        step('Area per count', 'L × R', `${n(v.len)} ft × ${n(v.rw, 3)} ft`, `${n(areaFt2, 2)} ft²`),
-        step('Average count', 'P ÷ N', `${n(v.plants)} ÷ ${n(v.counts)}`, `${n(avg, 1)}`),
-        step('Plants per acre', 'avg × 43,560 ÷ area', `${n(avg, 1)} × 43,560 ÷ ${n(areaFt2, 2)}`, `${n(pop)} /ac`, !v.target),
-      ];
-      if (v.target) {
-        const pct = pop / v.target * 100;
-        results.push({ label: '% of target', value: pct, unit: '%', decimals: 1 });
-        work.push(step('% of target', 'pop ÷ T', `${n(pop)} ÷ ${n(v.target)}`, `${n(pct, 1)}%`, true));
-      }
-      return { results, work };
-    },
-  },
-
-  {
-    id: 'seed-cost',
-    title: 'Seed Cost per Acre',
-    category: 'seeding',
-    desc: 'Seed cost per acre and per field, by the unit or by the pound.',
-    fields: [
-      { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'mode', label: 'Seed sold by', type: 'select', def: 'lb', cropDefault: c => (c.unit ? 'unit' : 'lb'), options: [{ value: 'unit', label: 'Unit / bag (count)' }, { value: 'lb', label: 'Weight' }] },
-      { name: 'price', label: 'Price per unit', sym: 'P', money: true, unit: '/unit', def: 300, cropDefault: c => (c.unit ? c.seedPrice : undefined), show: v => v.mode === 'unit' },
-      { name: 'unitSize', label: 'Seeds per unit', sym: 'U', unit: 'seeds', def: 80000, cropDefault: 'unit', show: v => v.mode === 'unit' },
-      { name: 'rate', label: 'Seeding rate', sym: 'R', dim: 'countRate', def: 34000, cropDefault: 'target', show: v => v.mode === 'unit' },
-      { name: 'priceLb', label: 'Price per lb', sym: 'P', money: true, unit: '/lb', def: 0.3, cropDefault: c => (c.unit ? undefined : c.seedPrice), show: v => v.mode === 'lb' },
-      { name: 'lbAc', label: 'Seeding rate', sym: 'R', dim: 'massRate', def: 90, cropDefault: c => c.seedLbAc || undefined, show: v => v.mode === 'lb' },
-      { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v, ctx) {
-      let perAc, work;
-      if (v.mode === 'lb') {
-        perAc = v.lbAc * v.priceLb;
-        work = [step('Cost per acre', 'R × P', `${n(v.lbAc)} lb/ac × ${m(v.priceLb, ctx)}`, m(perAc, ctx), !v.acres)];
-      } else {
-        if (!(v.unitSize > 0)) return fail('Seeds per unit must be more than zero.');
-        const uAc = v.rate / v.unitSize;
-        perAc = uAc * v.price;
-        work = [
-          step('Units per acre', 'R ÷ U', `${n(v.rate)} ÷ ${n(v.unitSize)}`, `${n(uAc, 3)} units/ac`),
-          step('Cost per acre', 'units/ac × P', `${n(uAc, 3)} × ${m(v.price, ctx)}`, m(perAc, ctx), !v.acres),
-        ];
-      }
-      const results = [{ label: 'Seed cost', value: perAc, dim: 'moneyArea', money: true, primary: true }];
-      if (v.acres) {
-        results.push({ label: 'Total for field', value: perAc * v.acres, money: true, decimals: 0 });
-        work.push(step('Total for field', 'cost/ac × A', `${m(perAc, ctx)} × ${n(v.acres)}`, m(perAc * v.acres, ctx, 0), true));
-      }
-      return { results, work };
+      const areaFt2 = v.len * v.rw;
+      if (!(areaFt2 > 0) || !(v.counts > 0)) return fail('Row width, length and number of counts must be more than zero.');
+      const perFt2 = v.plants / v.counts / areaFt2;
+      const P = v.counts > 1 ? 'P ÷ N' : 'P';
+      const Ps = v.counts > 1 ? `${n(v.plants)} ÷ ${n(v.counts)}` : n(v.plants);
+      const area = `(${n(v.len)} ft × ${n(v.rw, 3)} ft)`;
+      // Sask: plants per ft²; elsewhere plants per acre
+      const work = [ctx.system === 'sk'
+        ? step('Plants per ft²', `${P} ÷ (L × R)`, `${Ps} ÷ ${area}`, `${n(perFt2, 1)} /ft²`, true)
+        : step('Plants per acre', `${P} ÷ (L × R) × 43,560`, `${Ps} ÷ ${area} × 43,560`, `${n(perFt2 * 43560)} /ac`, true)];
+      return {
+        results: [{ label: 'Population', value: perFt2 * 43560, dim: 'countRate', units: { us: 'pac', metric: 'pm2', sk: 'pft2' }, unitSet: ['pft2', 'pac', 'pm2', 'pha'], primary: true }],
+        work,
+      };
     },
   },
 ];
@@ -1566,7 +1197,6 @@ __exp.default = [
         return {
           results: [
             { label: 'Nozzle flow needed', value: gpm, dim: 'flow', decimals: 3, primary: true },
-            { label: 'Catch per nozzle in 1 min', value: gpm * 128, unit: 'fl oz', decimals: 1 },
           ],
           work: [step('Nozzle flow', 'GPA × S × W ÷ 5,940', `${n(v.gpa)} × ${n(v.speed)} × ${n(W)} ÷ 5,940`, `${n(gpm, 3)} gal/min`, true)],
           notes: ['Pick a nozzle size that gives this flow in the middle of its pressure range.'],
@@ -1576,7 +1206,6 @@ __exp.default = [
       return {
         results: [
           { label: 'Application rate', value: gpa, dim: 'volRate', primary: true },
-          { label: 'Catch per nozzle in 1 min', value: v.gpm * 128, unit: 'fl oz', decimals: 1 },
         ],
         work: [step('Rate', 'Q × 5,940 ÷ (S × W)', `${n(v.gpm, 3)} × 5,940 ÷ (${n(v.speed)} × ${n(W)})`, `${n(gpa)} gal/ac`, true)],
         notes: ['5,940 converts gal/min, mph and inches to gal/ac. Flow changes with √pressure: doubling flow takes 4× the pressure.'],
@@ -1587,7 +1216,6 @@ __exp.default = [
 
   {
     id: 'tank-mix',
-    summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
     // Reference card shown under the results: the standard W-A-L-E-S mixing order.
@@ -1608,15 +1236,13 @@ __exp.default = [
       { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000, defSk: 4500 },
       { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40 },
       product(1, 32), product(2, null), product(3, null),
-      { name: 'acres', label: 'Field size', sym: 'F', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v) {
       if (!(v.gpa > 0)) return fail('Carrier rate must be more than zero.');
       const acTank = v.tank / v.gpa;
       const haTank = acTank / 2.4710538147;
-      const work = [step('Acres per tank', 'T ÷ GPA', `${n(v.tank)} gal ÷ ${n(v.gpa)} gal/ac`, `${n(acTank)} ac`)];
+      const work = [step('Acres per tank', 'T ÷ GPA', `${n(v.tank)} gal ÷ ${n(v.gpa)} gal/ac`, `${n(acTank)} ac`, true)];
       const results = [{ label: 'Acres per tank', value: acTank, dim: 'area', primary: true }];
-      const tanks = v.acres ? v.acres / acTank : 0;
       [1, 2, 3].forEach(i => {
         const rate = v[`p${i}`];
         if (!rate) return;
@@ -1625,19 +1251,9 @@ __exp.default = [
         const per = ch.ha ? haTank : acTank;
         const amt = rate * per;
         results.push({ label: `Product ${L} per tank`, text: friendly(amt, ch.amt) });
-        work.push(step(`Product ${L} per tank`, `${L} × ${ch.ha ? 'ha' : 'ac'}/tank`, `${n(rate)} ${ch.label} × ${n(per)}`, friendly(amt, ch.amt), !v.acres && i === 1));
-        if (v.acres) {
-          const fieldAmt = rate * (ch.ha ? v.acres / 2.4710538147 : v.acres);
-          results.push({ label: `Product ${L} for field`, text: friendly(fieldAmt, ch.amt) });
-        }
+        // product per tank, worked straight from the tank size
+        work.push(step(`Product ${L} per tank`, ch.ha ? `${L} × T ÷ GPA ÷ 2.471` : `${L} × T ÷ GPA`, `${n(rate)} ${ch.label} × ${n(v.tank)} gal ÷ ${n(v.gpa)}${ch.ha ? ' ÷ 2.471' : ''}`, friendly(amt, ch.amt), true));
       });
-      if (v.acres) {
-        const full = Math.floor(tanks + 1e-9);
-        const partAc = v.acres - full * acTank;
-        results.push({ label: 'Tank loads for field', value: tanks, unit: 'tanks', decimals: 2 });
-        if (partAc > 0.01) results.push({ label: 'Last partial load', value: partAc * v.gpa, dim: 'volume' });
-        work.push(step('Loads', 'F ÷ ac/tank', `${n(v.acres)} ÷ ${n(acTank)}`, `${n(tanks, 2)} tanks`, true));
-      }
       return { results, work, notes: ['Add products in mixing order. See the card below.'] };
     },
   },
@@ -1654,13 +1270,35 @@ const PRICE_CHOICES = [{ value: 'ton', label: '/ton', lb: 2000 }, { value: 't', 
 const priceField = (name, label, def, show) => ({ name, label, money: true, choices: PRICE_CHOICES, choiceDefault: { us: 'ton', metric: 't', sk: 't' }, def, optional: true, show });
 const perLb = (price, unit) => price / (PRICE_CHOICES.find(c => c.value === unit) || PRICE_CHOICES[0]).lb;
 
+// Nutrient uptake (whole crop) and removal (grain only), lb per bushel of grain:
+//   [N, P2O5, K2O, S]
+// survey: "Revising the crop nutrient uptake and removal guidelines for Western Canada"
+//   final report (2023), F. Walley & R. Farrell, University of Saskatchewan, with Manitoba
+//   Agriculture and Nutrien Ag Solutions; Saskatchewan ADF project 2119018. Means from prairie
+//   commercial fields, 2020–2022 (Table 3 removal, Table 5 uptake).
+// cfi: 2001 Canadian Fertilizer Institute "Nutrient Uptake and Removal by Field Crops, Western
+//   Canada" (middle of the published range), as listed in the same report.
+const NUTRIENTS = {
+  wheat:    { survey: { up: [1.55, 0.55, 2.00, 0.19], rm: [1.38, 0.49, 0.31, 0.10] }, cfi: { up: [2.11, 0.80, 1.81, 0.23], rm: [1.50, 0.59, 0.44, 0.12] } },
+  durum:    { survey: { up: [3.14, 1.07, 3.33, 0.36], rm: [1.64, 0.50, 0.30, 0.10] } },
+  barley:   { survey: { up: [1.00, 0.38, 1.57, 0.16], rm: [0.86, 0.36, 0.26, 0.07] }, cfi: { up: [1.39, 0.56, 1.33, 0.165], rm: [0.97, 0.42, 0.32, 0.09] } },
+  oats:     { survey: { up: [1.00, 0.30, 1.65, 0.14], rm: [0.65, 0.25, 0.17, 0.05] }, cfi: { up: [1.07, 0.41, 1.46, 0.13], rm: [0.62, 0.26, 0.19, 0.05] } },
+  canola:   { survey: { up: [2.38, 0.90, 2.93, 0.86], rm: [1.68, 0.67, 0.35, 0.19] }, cfi: { up: [3.19, 1.47, 2.31, 0.54], rm: [1.93, 1.04, 0.52, 0.32] } },
+  flax:     { survey: { up: [2.26, 0.80, 2.92, 0.30], rm: [1.89, 0.63, 0.42, 0.12] }, cfi: { up: [2.89, 0.83, 1.81, 0.56], rm: [2.12, 0.65, 0.61, 0.23] } },
+  pea:      { survey: { up: [2.66, 0.70, 2.97, 0.37], rm: [1.75, 0.47, 0.55, 0.10] }, cfi: { up: [3.06, 0.84, 2.73, 0.25], rm: [2.34, 0.69, 0.71, 0.13] } },
+  lentil:   { survey: { up: [2.49, 0.66, 2.04, 0.21], rm: [2.44, 0.56, 0.63, 0.12] }, cfi: { up: [3.05, 0.82, 2.55, 0.30], rm: [2.03, 0.62, 1.09, 0.15] } },
+  soybeans: { survey: { up: [4.06, 1.05, 3.24, 0.29], rm: [2.99, 0.74, 0.89, 0.17] }, cfi: { up: [5.20, 0.90, 3.40, 0.35], rm: [3.87, 0.84, 1.39, 0.10] } },
+  corn:     { survey: { up: [1.21, 0.60, 1.28, 0.12], rm: [0.94, 0.36, 0.23, 0.053] }, cfi: { up: [1.53, 0.63, 1.29, 0.15], rm: [0.97, 0.44, 0.28, 0.07] } },
+};
+const PULSES = ['pea', 'lentil', 'soybeans'];
+const NUT = ['N', 'P₂O₅', 'K₂O', 'S'];
+
 const P_SOURCES = { map: { label: 'MAP 11-52-0', n: 11, p: 52 }, dap: { label: 'DAP 18-46-0', n: 18, p: 46 } };
 const N_SOURCES = { urea: { label: 'Urea 46-0-0', n: 46, s: 0 }, ams: { label: 'AMS 21-0-0-24S', n: 21, s: 24 } };
 
 __exp.default = [
   {
     id: 'fertilizer-blend',
-    summary: ['Blend analysis', 'Cost per acre'],   // supporting results on a notebook summary card
     title: 'Fertilizer Blend',
     category: 'fertilizer',
     desc: 'Pounds of urea/AMS, MAP/DAP and potash to hit an N-P-K target.',
@@ -1670,12 +1308,8 @@ __exp.default = [
       { name: 'K', label: 'Potash (K₂O)', sym: 'K', dim: 'massRate', def: 90, defMetric: 100 },
       { name: 'psrc', label: 'Phosphate source', type: 'select', def: 'map', options: Object.entries(P_SOURCES).map(([value, s]) => ({ value, label: s.label })) },
       { name: 'nsrc', label: 'Nitrogen source', type: 'select', def: 'urea', options: Object.entries(N_SOURCES).map(([value, s]) => ({ value, label: s.label })) },
-      priceField('nPrice', 'N source price', 550),
-      priceField('pPrice', 'Phosphate source price', 750),
-      priceField('kPrice', 'Potash price', 450),
-      { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
-    compute(v, ctx) {
+    compute(v) {
       const ps = P_SOURCES[v.psrc], ns = N_SOURCES[v.nsrc];
       const pLb = v.P / (ps.p / 100);
       const nFromP = pLb * ps.n / 100;
@@ -1684,34 +1318,21 @@ __exp.default = [
       const kLb = v.K / 0.6;
       const total = pLb + nLb + kLb;
       if (!(total > 0)) return fail('Enter at least one nutrient target.');
-      const nTot = nFromP + nLb * ns.n / 100;
-      const sTot = nLb * ns.s / 100;
-      const analysis = [nTot, v.P, v.K].map(x => Math.round(x / total * 100)).join('-') + (sTot ? `-${Math.round(sTot / total * 100)}S` : '');
       const nsName = ns.label.split(' ')[0], psName = ps.label.split(' ')[0];
       const work = [
-        step(`${psName} for P`, `P ÷ ${ps.p}%`, `${n(v.P)} ÷ ${ps.p / 100}`, `${n(pLb, 1)} lb`),
-        step(`N from ${psName}`, `${psName} × ${ps.n}%`, `${n(pLb, 1)} × ${ps.n / 100}`, `${n(nFromP, 1)} lb N`),
-        step(`${nsName} for rest of N`, `(N − ${n(nFromP, 1)}) ÷ ${ns.n}%`, `${n(nNeed, 1)} ÷ ${ns.n / 100}`, `${n(nLb, 1)} lb`),
-        step('Potash for K', 'K ÷ 60%', `${n(v.K)} ÷ 0.6`, `${n(kLb, 1)} lb`),
-        step('Total blend', 'sum', `${n(pLb, 1)} + ${n(nLb, 1)} + ${n(kLb, 1)}`, `${n(total, 1)} lb/ac`, true),
+        step(psName, `P ÷ ${ps.p}%`, `${n(v.P)} ÷ ${ps.p}%`, `${n(pLb, 1)} lb`),
+        step(nsName, `(N − ${psName} × ${ps.n}%) ÷ ${ns.n}%`, `(${n(v.N)} − ${n(pLb, 1)} × ${ps.n}%) ÷ ${ns.n}%`, `${n(nLb, 1)} lb`),
+        step('Potash', 'K ÷ 60%', `${n(v.K)} ÷ 60%`, `${n(kLb, 1)} lb`),
+        step('Total blend', `${psName} + ${nsName} + potash`, `${n(pLb, 1)} + ${n(nLb, 1)} + ${n(kLb, 1)}`, `${n(total, 1)} lb/ac`, true),
       ];
       const results = [
         { label: 'Total blend', value: total, dim: 'massRate', primary: true },
         { label: ns.label, value: nLb, dim: 'massRate' },
         { label: ps.label, value: pLb, dim: 'massRate' },
         { label: 'Potash 0-0-60', value: kLb, dim: 'massRate' },
-        { label: 'Blend analysis', text: analysis },
       ];
-      if (sTot) results.push({ label: 'Sulfur supplied', value: sTot, dim: 'massRate' });
       const warn = [];
       if (nFromP > v.N) warn.push(`The ${psName} alone supplies ${n(nFromP, 1)} lb N, more than the ${n(v.N)} lb target.`);
-      if (v.nPrice || v.pPrice || v.kPrice) {
-        const cost = nLb * perLb(v.nPrice || 0, v.nPriceUnit) + pLb * perLb(v.pPrice || 0, v.pPriceUnit) + kLb * perLb(v.kPrice || 0, v.kPriceUnit);
-        results.push({ label: 'Cost per acre', value: cost, dim: 'moneyArea', money: true });
-        if (v.acres) results.push({ label: 'Cost for field', value: cost * v.acres, money: true, decimals: 0 });
-        work.push(step('Cost per acre', 'lb × price/lb', [[nLb, v.nPrice, v.nPriceUnit], [pLb, v.pPrice, v.pPriceUnit], [kLb, v.kPrice, v.kPriceUnit]].filter(x => x[1] && x[0]).map(([lb, p, u]) => `${n(lb, 1)} × ${m(perLb(p, u), ctx, 3)}`).join(' + '), m(cost, ctx)));
-      }
-      if (v.acres) results.push({ label: 'Blend for field', value: total * v.acres, dim: 'mass', units: { us: 'ton', metric: 't' } });
       return { results, work, warn };
     },
   },
@@ -1721,7 +1342,7 @@ __exp.default = [
     summary: ['Cost per acre'],   // supporting results on a notebook summary card
     title: 'Nitrogen Rate & Cost',
     category: 'fertilizer',
-    desc: 'Product rate for a target N rate, cost per pound of N and per acre.',
+    desc: 'Product rate for a target N rate, and cost per acre.',
     fields: [
       {
         name: 'prod', label: 'Product', type: 'select', def: 'nh3', options: [
@@ -1733,32 +1354,64 @@ __exp.default = [
       { name: 'pct', label: 'Nitrogen content', sym: '%N', unit: '%', def: 30, show: v => v.prod === 'custom' },
       { name: 'N', label: 'Target N rate', sym: 'N', dim: 'massRate', def: 160, defMetric: 180 },
       priceField('price', 'Product price', 800),
-      { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v, ctx) {
       const PROD = { nh3: [82, 0], urea: [46, 0], uan28: [28, 10.66], uan32: [32, 11.06], ams: [21, 0], custom: [v.pct, 0] };
-      const [pct, dens] = PROD[v.prod];
+      const [pct] = PROD[v.prod];
       if (!(pct > 0)) return fail('Nitrogen content must be more than zero.');
       const lbAc = v.N / (pct / 100);
-      const work = [step('Product rate', 'N ÷ %N', `${n(v.N)} ÷ ${pct / 100}`, `${n(lbAc, 1)} lb/ac`, !v.price)];
+      const work = [step('Product rate', 'N ÷ %N', `${n(v.N)} ÷ ${pct}%`, `${n(lbAc, 1)} lb/ac`, !v.price)];
       const results = [{ label: 'Product rate', value: lbAc, dim: 'massRate', primary: true }];
-      if (dens) {
-        results.push({ label: 'Liquid rate', value: lbAc / dens, dim: 'volRate' }, { label: 'Lb of N per gallon', value: dens * pct / 100, unit: 'lb N/gal' });
-        work.push(step('Gallons per acre', `lb ÷ ${dens} lb/gal`, `${n(lbAc, 1)} ÷ ${dens}`, `${n(lbAc / dens, 1)} gal/ac`));
-      }
       if (v.price) {
         const pLb = perLb(v.price, v.priceUnit);
-        const perN = pLb / (pct / 100);
-        const perAc = perN * v.N;
-        results.push({ label: 'Cost per lb N', value: perN, money: true, decimals: 3 }, { label: 'Cost per acre', value: perAc, dim: 'moneyArea', money: true });
-        work.push(
-          step('Cost per lb N', 'price/lb ÷ %N', `${m(pLb, ctx, 4)} ÷ ${pct / 100}`, m(perN, ctx, 3)),
-          step('Cost per acre', '$/lb N × N', `${m(perN, ctx, 3)} × ${n(v.N)}`, m(perAc, ctx), true),
-        );
-        if (v.acres) results.push({ label: 'Cost for field', value: perAc * v.acres, money: true, decimals: 0 });
+        const perAc = lbAc * pLb;
+        const tonLb = v.priceUnit === 't' ? '2,204.6' : '2,000';
+        results.push({ label: 'Cost per acre', value: perAc, dim: 'moneyArea', money: true });
+        work.push(step('Cost per acre', `rate × price ÷ ${tonLb}`, `${n(lbAc, 1)} × ${m(v.price, ctx)} ÷ ${tonLb}`, m(perAc, ctx), true));
       }
-      if (v.acres) results.push({ label: 'Product for field', value: lbAc * v.acres, dim: 'mass', units: { us: 'ton', metric: 't' } });
       return { results, work };
+    },
+  },
+  {
+    id: 'crop-nutrients',
+    title: 'Crop Nutrient Needs',
+    category: 'fertilizer',
+    desc: 'N, P₂O₅, K₂O and S a crop takes up and removes for a target yield (Western Canada data).',
+    fields: [
+      { name: 'crop', label: 'Crop', type: 'crop', cropIds: Object.keys(NUTRIENTS) },
+      { name: 'yield', label: 'Target yield', sym: 'Y', unit: 'bu/ac', def: 60, cropDefault: 'yld' },
+      {
+        name: 'source', label: 'Data', type: 'select', def: 'survey',
+        options: [{ value: 'survey', label: '2023 survey' }, { value: 'cfi', label: '2001 CFI' }],
+        help: 'The 2023 survey (U of S, Sask ADF) updates the 2001 Canadian Fertilizer Institute values',
+      },
+    ],
+    compute(v) {
+      const data = NUTRIENTS[v.crop];
+      if (!data) return fail('No Western Canada data for this crop.');
+      if (!(v.yield > 0)) return fail('Enter a target yield.');
+      const usedCfi = v.source === 'cfi' && data.cfi;
+      const d = usedCfi ? data.cfi : data.survey;
+      const Y = v.yield;
+      const up = d.up.map(k => k * Y), rm = d.rm.map(k => k * Y);
+      const r0 = x => Math.round(x);
+      const nkps = a => a.map(r0).join('-');
+      const per = a => `(${a.map(k => n(k, 3)).join(', ')})`;
+      const work = [
+        step('Crop uptake', 'Y × lb per bu (N, P₂O₅, K₂O, S)', `${n(Y)} × ${per(d.up)}`, `${nkps(up)} lb/ac`, true),
+        step('Removed with grain', 'Y × lb per bu (N, P₂O₅, K₂O, S)', `${n(Y)} × ${per(d.rm)}`, `${nkps(rm)} lb/ac`, true),
+      ];
+      const results = [
+        { label: 'Crop uptake, lb/ac (N-P₂O₅-K₂O-S)', text: nkps(up), primary: true },
+        { label: 'Removed with grain, lb/ac', text: nkps(rm) },
+      ];
+      const notes = [
+        usedCfi ? 'Source: 2001 Canadian Fertilizer Institute guide (Western Canada).' : 'Source: 2023 Western Canada survey (U of S, Saskatchewan ADF 2119018), prairie fields 2020–2022.',
+        'Uptake is what the whole crop needs; removal is what leaves with the grain (replace it to hold soil P, K and S steady). Guidance only. Pair it with a soil test.',
+      ];
+      if (v.source === 'cfi' && !data.cfi) notes.unshift('The 2001 guide has no values for this crop, so the 2023 survey is shown.');
+      if (PULSES.includes(v.crop)) notes.unshift('Pulses fix most of their own N when inoculated, so they rarely need much fertilizer N.');
+      return { results, work, notes };
     },
   },
 ];
@@ -1773,38 +1426,23 @@ const { n, m, step, fail } = __mods['js/calcs/_h.js'];
 __exp.default = [
   {
     id: 'break-even',
-    summary: ['Break-even yield'],   // supporting results on a notebook summary card
     title: 'Break-even Price',
     category: 'marketing',
-    desc: 'Price per bushel to cover costs, and break-even yield at a price.',
+    desc: 'Price per bushel you need to cover your costs.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
       { name: 'cost', label: 'Total cost', sym: 'C', dim: 'moneyArea', money: true, def: 300, defMetric: 740 },
       { name: 'yield', label: 'Expected yield', sym: 'Y', dim: 'grainYield', def: 60, cropDefault: 'yld' },
       { name: 'other', label: 'Other income', sym: 'O', dim: 'moneyArea', money: true, def: 0, optional: true, help: 'Program payments, insurance, straw, etc.' },
-      { name: 'price', label: 'Expected price', sym: 'P', dim: 'grainPrice', def: 6, cropDefault: 'price', optional: true },
     ],
     compute(v, ctx) {
       const yBu = v.yield / ctx.tw;
       if (!(yBu > 0)) return fail('Yield must be more than zero.');
-      const net = v.cost - (v.other || 0);
-      const be = net / yBu;
-      const work = [step('Break-even price', v.other ? '(C − O) ÷ Y' : 'C ÷ Y', v.other ? `(${m(v.cost, ctx)} − ${m(v.other, ctx)}) ÷ ${n(yBu)} bu` : `${m(v.cost, ctx)} ÷ ${n(yBu)} bu`, `${m(be, ctx)}/bu`, !v.price)];
-      const results = [{ label: 'Break-even price', value: be, dim: 'grainPrice', money: true, primary: true }];
-      if (v.price) {
-        const beY = net / v.price;
-        const profit = yBu * v.price - net;
-        results.push(
-          { label: 'Break-even yield', value: beY * ctx.tw, dim: 'grainYield' },
-          { label: 'Return over cost', value: profit, dim: 'moneyArea', money: true },
-          { label: 'Margin per bushel', value: v.price - be, money: true, unit: '/bu' },
-        );
-        work.push(
-          step('Break-even yield', v.other ? '(C − O) ÷ P' : 'C ÷ P', `${m(net, ctx)} ÷ ${m(v.price, ctx)}`, `${n(beY, 1)} bu/ac`),
-          step('Return over cost', 'Y × P − cost', `${n(yBu)} × ${m(v.price, ctx)} − ${m(net, ctx)}`, `${m(profit, ctx)}/ac`, true),
-        );
-      }
-      return { results, work };
+      const be = (v.cost - (v.other || 0)) / yBu;
+      return {
+        results: [{ label: 'Break-even price', value: be, dim: 'grainPrice', money: true, primary: true }],
+        work: [step('Break-even price', v.other ? '(C − O) ÷ Y' : 'C ÷ Y', v.other ? `(${m(v.cost, ctx)} − ${m(v.other, ctx)}) ÷ ${n(yBu)} bu` : `${m(v.cost, ctx)} ÷ ${n(yBu)} bu`, `${m(be, ctx)}/bu`, true)],
+      };
     },
   },
 
@@ -1819,27 +1457,22 @@ __exp.default = [
       { name: 'costAc', label: 'Cost per acre', sym: 'C', dim: 'moneyArea', money: true, def: 120, defMetric: 300, show: v => v.mode === 'ac2bu' },
       { name: 'costBu', label: 'Cost per bushel', sym: 'C', dim: 'grainPrice', def: 0.6, show: v => v.mode === 'bu2ac' },
       { name: 'yield', label: 'Yield', sym: 'Y', dim: 'grainYield', def: 60, cropDefault: 'yld' },
-      { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v, ctx) {
       const yBu = v.yield / ctx.tw;
       if (!(yBu > 0)) return fail('Yield must be more than zero.');
-      let perAc, perBu, work;
       if (v.mode === 'bu2ac') {
-        perBu = v.costBu; perAc = perBu * yBu;
-        work = [step('Cost per acre', 'C × Y', `${m(perBu, ctx, 3)} × ${n(yBu)} bu/ac`, `${m(perAc, ctx)}/ac`, !v.acres)];
-      } else {
-        perAc = v.costAc; perBu = perAc / yBu;
-        work = [step('Cost per bushel', 'C ÷ Y', `${m(perAc, ctx)} ÷ ${n(yBu)} bu/ac`, `${m(perBu, ctx, 3)}/bu`, !v.acres)];
+        const perAc = v.costBu * yBu;
+        return {
+          results: [{ label: 'Cost per acre', value: perAc, dim: 'moneyArea', money: true, primary: true }],
+          work: [step('Cost per acre', 'C × Y', `${m(v.costBu, ctx, 3)} × ${n(yBu)} bu/ac`, `${m(perAc, ctx)}/ac`, true)],
+        };
       }
-      const results = v.mode === 'bu2ac'
-        ? [{ label: 'Cost per acre', value: perAc, dim: 'moneyArea', money: true, primary: true }, { label: 'Cost per bushel', value: perBu, dim: 'grainPrice', money: true, decimals: 3 }]
-        : [{ label: 'Cost per bushel', value: perBu, dim: 'grainPrice', money: true, decimals: 3, primary: true }, { label: 'Cost per acre', value: perAc, dim: 'moneyArea', money: true }];
-      if (v.acres) {
-        results.push({ label: 'Total for field', value: perAc * v.acres, money: true, decimals: 0 });
-        work.push(step('Total for field', 'cost/ac × A', `${m(perAc, ctx)} × ${n(v.acres)}`, m(perAc * v.acres, ctx, 0), true));
-      }
-      return { results, work };
+      const perBu = v.costAc / yBu;
+      return {
+        results: [{ label: 'Cost per bushel', value: perBu, dim: 'grainPrice', money: true, decimals: 3, primary: true }],
+        work: [step('Cost per bushel', 'C ÷ Y', `${m(v.costAc, ctx)} ÷ ${n(yBu)} bu/ac`, `${m(perBu, ctx, 3)}/bu`, true)],
+      };
     },
   },
 ];
@@ -1887,7 +1520,6 @@ __exp.default = [
       return {
         results: [
           { label: `${n(value)} ${fl} =`, value: out, unit: tl, primary: true, decimals: Math.abs(out) < 1 ? 6 : undefined },
-          ...allRows(dim, value, from, ctx).filter(r => r.label !== tl),
         ],
         work: [step(`${fl} to ${tl}`, dim === 'temperature' ? factorText(dim, from, to, ctx) : `x ${factorText(dim, from, to, ctx)}`, dim === 'temperature' ? `x = ${n(value)} ${fl}` : `${n(value)} ${factorText(dim, from, to, ctx)}`, `${n(out, Math.abs(out) < 1 ? 6 : undefined)} ${tl}`, true)],
       };
@@ -1978,6 +1610,7 @@ const DEFAULT_SETTINGS = {
   paper: 'grid',         // 'grid' | 'lines' | 'blank'
   smoothing: 'medium',   // ink smoothing for pen & highlighter: 'off' | 'light' | 'medium' | 'strong'
   hidden: [],            // calculator ids hidden from the home screen (still usable via links/notebook)
+  snap: 'on',            // notebook: line entries up with the ruling/grid when moved
   theme: 'night',        // 'night' | 'day' | 'auto' (follow the phone)
 };
 
@@ -2076,13 +1709,25 @@ const PAGE_H = 2000;
 const HEAD_H = 150;      // page heading band at the top of the paper
 const MARGIN_X = 110;    // left of the margin line (clears the ring holes)
 const RULE = 36;         // ruled-line spacing on lined paper
-const ROW_OFFSET = 8;    // where a card's first line starts inside a ruled row (puts the writing on the rule)
+const ROW_OFFSET = 2;    // where a card's first line starts inside a ruled row: the rule then runs just under
+                                // the lowest letters (g, y, commas) and under the answer boxes, never through them
 const CARD_W = 340;
 const COLS = [MARGIN_X + 14, MARGIN_X + 14 + CARD_W + 20, MARGIN_X + 14 + 2 * (CARD_W + 20)];
 
 /** Snap a card's top so its lines of writing sit on the ruled lines. */
+const GRID = 32;         // grid paper square size
+const GRID_OFFSET = 0;          // each line of writing fills one grid square, between two grid lines
 function snapToRule(y) {
+  if (settings.paper === 'grid') return HEAD_H + GRID_OFFSET + Math.max(0, Math.round((y - HEAD_H - GRID_OFFSET) / GRID)) * GRID;
+  if (settings.paper === 'blank') return Math.round(Math.max(HEAD_H + ROW_OFFSET, y));
   return HEAD_H + ROW_OFFSET + Math.max(0, Math.round((y - HEAD_H - ROW_OFFSET) / RULE)) * RULE;
+}
+/** Left edge: on grid paper, line the writing up with a grid column. */
+function snapX(x) {
+  return settings.paper === 'grid' ? Math.round((x + 8) / GRID) * GRID - 8 : Math.round(x);
+}
+/** Settings → Snap to lines (on unless turned off). */
+function snapOn() { return settings.snap !== 'off';
 }
 
 /** Rough card height (one ruled row per written line) for cards not yet measured on screen. */
@@ -2203,7 +1848,7 @@ function clearAll() {
   Object.assign(settings, DEFAULT_SETTINGS);
   setDecimals(settings.decimals);
 }
-Object.assign(__exp, { settings, saveSettings, prefs, pushRecentCalc, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, RULE, ROW_OFFSET, snapToRule, estimateCardH, notebook, saveNotebook, getPage, addPage, deletePage, addCardToPage, exportBackup, importBackup, clearAll });
+Object.assign(__exp, { settings, saveSettings, prefs, pushRecentCalc, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, RULE, ROW_OFFSET, GRID, snapToRule, snapX, snapOn, estimateCardH, notebook, saveNotebook, getPage, addPage, deletePage, addCardToPage, exportBackup, importBackup, clearAll });
 return __exp;
 })();
 
@@ -2212,12 +1857,15 @@ __mods['js/pages/home.js'] = (function () {
 const __exp = {};
 const { h, icon } = __mods['js/ui.js'];
 const { CATEGORIES, CALCS } = __mods['js/registry.js'];
-const { prefs, settings } = __mods['js/store.js'];
+const { settings } = __mods['js/store.js'];
 
 // Home: the FarmCalc header and the calculator tiles, grouped by category
 // (tap a category heading to collapse or expand it).
+// Groups start minimized each time the app opens; ones you open stay open
+// while you go in and out of calculators.
+const opened = new Set();
+
 function renderHome(view) {
-  const collapsed = new Set(prefs.get('collapsed', []));
   const list = h('div.cat-list');
 
   const draw = () => {
@@ -2226,14 +1874,13 @@ function renderHome(view) {
     for (const cat of CATEGORIES) {
       const calcs = CALCS.filter(c => c.category === cat.id && !hidden.has(c.id));
       if (!calcs.length) continue;
-      const isCollapsed = collapsed.has(cat.id);
+      const isCollapsed = !opened.has(cat.id);
       list.append(h('section.cat' + (isCollapsed ? '.collapsed' : ''),
         h('button.cat-head', {
           'aria-expanded': String(!isCollapsed),
           on: {
             click: () => {
-              if (collapsed.has(cat.id)) collapsed.delete(cat.id); else collapsed.add(cat.id);
-              prefs.set('collapsed', [...collapsed]);
+              if (opened.has(cat.id)) opened.delete(cat.id); else opened.add(cat.id);
               draw();
             },
           },
@@ -2282,6 +1929,10 @@ const CROPS = {
   barley:    { label: 'Barley',    tw: 48, moist: 14.5, harvest: 18, repose: 28, seedsLb: 13000,  unit: 0,      target: 1089000, seedLbAc: 96, seedPrice: 0.28, yld: 80,  price: 5 },
   oats:      { label: 'Oats',      tw: 32, moist: 14,   harvest: 18, repose: 28, seedsLb: 15000,  unit: 0,      target: 1219680, seedLbAc: 90, seedPrice: 0.3,  yld: 100, price: 3.5 },
   canola:    { label: 'Canola',    tw: 50, moist: 10,   harvest: 12, repose: 22, seedsLb: 100000, unit: 0,      target: 522720,  seedLbAc: 5,  seedPrice: 9,    yld: 50,  price: 13 },
+  durum:     { label: 'Durum',     tw: 60, moist: 14.5, harvest: 18, repose: 25, seedsLb: 11000,  unit: 0,      target: 1306800, seedLbAc: 110, seedPrice: 0.3, yld: 50,  price: 7 },
+  flax:      { label: 'Flax',      tw: 56, moist: 10,   harvest: 12, repose: 22, seedsLb: 80000,  unit: 0,      target: 2613600, seedLbAc: 40, seedPrice: 1,    yld: 30,  price: 15 },
+  pea:       { label: 'Field pea', tw: 60, moist: 16,   harvest: 18, repose: 25, seedsLb: 2000,   unit: 0,      target: 348480,  seedLbAc: 180, seedPrice: 0.3, yld: 50,  price: 9 },
+  lentil:    { label: 'Lentil',    tw: 60, moist: 13,   harvest: 16, repose: 24, seedsLb: 9000,   unit: 0,      target: 522720,  seedLbAc: 70, seedPrice: 0.6,  yld: 30,  price: 15 },
   rye:       { label: 'Rye',       tw: 56, moist: 14,   harvest: 18, repose: 26, seedsLb: 18000,  unit: 0,      target: 1306800, seedLbAc: 90, seedPrice: 0.35, yld: 50,  price: 6 },
   corn:      { label: 'Corn',      tw: 56, moist: 15.5, harvest: 25, repose: 23, seedsLb: 1600,   unit: 80000,  target: 34000,   seedLbAc: 0,  seedPrice: 300,  yld: 200, price: 4.5 },
   soybeans:  { label: 'Soybeans',  tw: 60, moist: 13,   harvest: 16, repose: 25, seedsLb: 2800,   unit: 140000, target: 140000,  seedLbAc: 0,  seedPrice: 60,   yld: 55,  price: 10.5 },
@@ -2324,7 +1975,7 @@ function makeCtx(def, state, settings) {
 }
 
 function selectOptions(f, v, ctx) {
-  if (f.type === 'crop') return Object.entries(CROPS).map(([value, c]) => ({ value, label: c.label }));
+  if (f.type === 'crop') return Object.entries(CROPS).filter(([id]) => !f.cropIds || f.cropIds.includes(id)).map(([value, c]) => ({ value, label: c.label }));
   return typeof f.options === 'function' ? f.options(v, ctx) : f.options;
 }
 
@@ -2379,7 +2030,7 @@ function initState(def, settings, saved, prefill) {
   // selects first (crop affects unit conversions for the number fields)
   for (const f of def.fields) {
     if (fieldType(f) === 'number') continue;
-    let val = f.type === 'crop' ? settings.crop : f.def;
+    let val = f.type === 'crop' ? (f.cropIds && !f.cropIds.includes(settings.crop) ? f.cropIds[0] : settings.crop) : f.def;
     // a choice can start from the crop too (e.g. seed sold by bag for corn, by weight for wheat)
     if (f.cropDefault) {
       const crop = CROPS[def.crop || state.values.crop || settings.crop] || CROPS.wheat;
@@ -2664,6 +2315,121 @@ Object.assign(__exp, { words, renderSummary, renderSteps });
 return __exp;
 })();
 
+// ---- js/speedo.js ----
+__mods['js/speedo.js'] = (function () {
+const __exp = {};
+// Live GPS speedometer for the Speedometer calculator. Uses the phone's GPS
+// (needs location permission and https, or localhost), keeps the screen awake
+// while it runs, and smooths the reading over the last few seconds.
+const { h, icon } = __mods['js/ui.js'];
+const { fromBase, defaultUnit, unitLabel } = __mods['js/units.js'];
+const { prefs } = __mods['js/store.js'];
+const { fmt } = __mods['js/format.js'];
+
+const MPH_PER_MS = 2.2369362921;
+
+/** Distance in metres between two GPS fixes (haversine). */
+function metresBetween(a, b) {
+  const R = 6371000, rad = d => d * Math.PI / 180;
+  const dLat = rad(b.latitude - a.latitude), dLon = rad(b.longitude - a.longitude);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/**
+ * Build the GPS panel. onReading(mph) is called with each smoothed reading
+ * (so the page can offer "use this speed"). Returns { el, stop }.
+ */
+function gpsSpeedometer(settings, onReading) {
+  // tap the unit (or the number) to step through these; the choice is remembered
+  const UNITS = ['kmh', 'mph', 'ms', 'kn'];
+  let unit = prefs.get('gpsUnit', null);
+  if (!UNITS.includes(unit)) unit = defaultUnit('speed', settings.system);
+  let lastMph = null;
+  const nextUnit = () => {
+    unit = UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length];
+    prefs.set('gpsUnit', unit);
+    unitEl.textContent = unitLabel('speed', unit);
+    if (lastMph !== null) big.textContent = fmt(fromBase('speed', lastMph, unit), 1);
+    if (sessionN && watchId === null) summary();
+  };
+  const big = h('button.gps-speed', { type: 'button', 'aria-label': 'Change speed unit', on: { click: nextUnit } }, '–');
+  const unitEl = h('button.gps-unit', { type: 'button', 'aria-label': 'Change speed unit', on: { click: nextUnit } }, unitLabel('speed', unit));
+  const sub = h('div.gps-sub', '');
+  const status = h('div.gps-status', 'Tap Start, then drive at a steady speed.');
+  const btn = h('button.btn.primary', { type: 'button', on: { click: () => (watchId === null ? start() : stop()) } }, icon('fieldops'), 'Start GPS');
+  const el = h('div.panel.gps-card',
+    h('div.gps-head', h('b', 'GPS speed'), h('span.gps-live')),
+    h('div.gps-readout', big, unitEl), sub, status, h('div.actions', btn));
+
+  let watchId = null, last = null, wake = null;
+  let samples = [];            // { t, mph } over the last few seconds
+  let sessionSum = 0, sessionN = 0, sessionMax = 0;
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
+  }
+  function show(mph, accuracy) {
+    const now = Date.now();
+    samples.push({ t: now, mph });
+    samples = samples.filter(s => now - s.t < 4000);              // smooth over ~4 s
+    const avg = samples.reduce((a, s) => a + s.mph, 0) / samples.length;
+    sessionSum += avg; sessionN++; sessionMax = Math.max(sessionMax, avg);
+    lastMph = avg;
+    big.textContent = fmt(fromBase('speed', avg, unit), 1);
+    sub.textContent = `Run average ${fmt(fromBase('speed', sessionSum / sessionN, unit), 1)} · top ${fmt(fromBase('speed', sessionMax, unit), 1)} ${unitLabel('speed', unit)}`;
+    status.textContent = accuracy ? `GPS accuracy ±${Math.round(accuracy)} m${accuracy > 15 ? ' · weak signal, reading may jump' : ''}` : 'Reading…';
+    el.classList.add('live');
+    if (onReading) onReading(avg);
+  }
+  function onPos(p) {
+    const c = p.coords;
+    let mph = null;
+    if (typeof c.speed === 'number' && c.speed >= 0 && !Number.isNaN(c.speed)) mph = c.speed * MPH_PER_MS;
+    else if (last) {
+      // no speed from the GPS chip: work it out from the distance between fixes
+      const dt = (p.timestamp - last.timestamp) / 1000;
+      if (dt >= 0.8) mph = metresBetween(last.coords, c) / dt * MPH_PER_MS;
+    }
+    if (!last || (p.timestamp - last.timestamp) >= 800) last = p;
+    if (mph !== null) show(mph, c.accuracy);
+    else status.textContent = `Waiting for movement… (±${Math.round(c.accuracy || 0)} m)`;
+  }
+  function onErr(err) {
+    status.textContent = err.code === 1
+      ? 'Location is off for this app. On iPhone: Settings → Privacy & Security → Location Services → Safari Websites (or Farm Calc) → While Using.'
+      : err.code === 3 ? 'Still looking for GPS… move to open sky.' : 'GPS not available right now.';
+    if (err.code === 1) stop();
+  }
+  function start() {
+    if (!('geolocation' in navigator)) { status.textContent = 'This device has no GPS access in the browser.'; return; }
+    if (!window.isSecureContext) { status.textContent = 'GPS needs the app opened over https.'; return; }
+    samples = []; last = null; sessionSum = 0; sessionN = 0; sessionMax = 0;
+    status.textContent = 'Finding GPS…';
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    keepAwake();
+    btn.replaceChildren(icon('close'), 'Stop');
+    btn.classList.remove('primary');
+  }
+  function stop() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    try { if (wake) wake.release(); } catch { /* already released */ }
+    wake = null;
+    el.classList.remove('live');
+    btn.replaceChildren(icon('fieldops'), 'Start GPS');
+    btn.classList.add('primary');
+    if (sessionN) summary();
+  }
+  function summary() {
+    status.textContent = `Stopped · run average ${fmt(fromBase('speed', sessionSum / sessionN, unit), 1)} ${unitLabel('speed', unit)}, top ${fmt(fromBase('speed', sessionMax, unit), 1)}`;
+  }
+  return { el, stop };
+}
+Object.assign(__exp, { gpsSpeedometer });
+return __exp;
+})();
+
 // ---- js/pages/calc.js ----
 __mods['js/pages/calc.js'] = (function () {
 const __exp = {};
@@ -2673,6 +2439,7 @@ const { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage, saveN
 const { fieldType, initState, run, selectOptions, isShown, unitChoices, fieldUnitLabel, applyCropDefaults, fixSelects, formatResult, snapshot } = __mods['js/engine.js'];
 const { renderSteps } = __mods['js/steps.js'];
 const { practicalUnits, unitLabel } = __mods['js/units.js'];
+const { gpsSpeedometer } = __mods['js/speedo.js'];
 
 /** A unit chip: each tap moves to the next unit in its (short, practical) list. */
 function unitToggle(cls, options, current, onChange, aria) {
@@ -2689,6 +2456,18 @@ function renderCalc(view, id, query) {
   const def = getCalc(id);
   if (!def) { view.append(h('div.empty', 'Calculator not found.'), h('a.btn', { href: '#/' }, 'Back to calculators')); return; }
   pushRecentCalc(id);
+  // a live tool with no inputs (Speedometer): just the tool itself
+  if (def.toolOnly) {
+    const tool = gpsSpeedometer(settings);
+    view.append(
+      h('header.topbar',
+        h('a.icon-btn.plain', { href: '#/', 'aria-label': 'Back' }, icon('back')),
+        h('h1', def.title),
+        h('span.icon-btn.plain', { 'aria-hidden': 'true' })),
+      h('p.calc-desc', def.desc),
+      tool.el);
+    return () => tool.stop();
+  }
 
   let prefill = null;
   if (query.get('p')) { try { prefill = JSON.parse(query.get('p')); } catch { prefill = null; } }
@@ -2704,6 +2483,8 @@ function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
+  // live tools shown above the inputs (Speedometer: GPS)
+  const gps = def.widget === 'gps' ? gpsSpeedometer(settings) : null;
   // optional reference card (e.g. Tank Mix: mixing order); open unless folded away before
   let infoEl = null;
   if (def.info) {
@@ -2820,7 +2601,15 @@ function renderCalc(view, id, query) {
       resultsEl.append(h('div.result-row', h('span.r-label', x.label), h('span.r-value', fr.valueText, fr.unitText ? ' ' : '', unitButton(x, fr, ''))));
     }
     (r.out.warn || []).forEach(w => resultsEl.append(h('div.result-warn', '⚠ ' + w)));
-    (r.out.notes || []).forEach(nt => resultsEl.append(h('div.result-note', nt)));
+    // extra info (spec-sheet basis, constants, sources) folds away under a small toggle
+    const notes = r.out.notes || [];
+    if (notes.length) {
+      const more = h('details.result-more', { open: prefs.get('notesOpen', false) },
+        h('summary', icon('chevR'), 'Details'),
+        notes.map(nt => h('div.result-note', nt)));
+      more.addEventListener('toggle', () => prefs.set('notesOpen', more.open));
+      resultsEl.append(more);
+    }
 
     const stepsEl = renderSteps({ steps: r.out.work }, { given: false });
     // a "+" on each step adds just that calculation to the notebook
@@ -2942,6 +2731,7 @@ function renderCalc(view, id, query) {
       h('h1', def.title),
       h('button.icon-btn.plain', { 'aria-label': 'Reset to defaults', title: 'Reset', on: { click: reset } }, icon('reset'))),
     h('p.calc-desc', def.desc),
+    gps ? gps.el : null,
     editing ? h('div.edit-banner', icon('edit'), h('span', 'Editing a notebook entry. Change any value, then tap ', h('b', 'Update'), '.')) : null,
     fieldsEl,
     resultsEl,
@@ -2953,6 +2743,8 @@ function renderCalc(view, id, query) {
   drawFields();
   update();
   if (prefill) save();
+  // stop live tools (GPS) when you leave the page
+  return () => { if (gps) gps.stop(); };
 }
 Object.assign(__exp, { renderCalc });
 return __exp;
@@ -3006,7 +2798,7 @@ const __exp = {};
 // Notebook: a pannable/zoomable page of calculation cards with an ink layer
 // on top for pen, highlighter, straight lines/arrows and a stroke eraser.
 const { h, icon, toast, openSheet, promptSheet, confirmSheet } = __mods['js/ui.js'];
-const { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } = __mods['js/store.js'];
+const { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule, snapX, snapOn, estimateCardH } = __mods['js/store.js'];
 const { renderSteps, renderSummary } = __mods['js/steps.js'];
 const { getCalc } = __mods['js/registry.js'];
 const { fmtDate, fmt, parseQty, parseNum } = __mods['js/format.js'];
@@ -3087,7 +2879,7 @@ async function renderNotebook(view, query) {
       // +/− only show with a mouse; on a phone you pinch to zoom (see CSS)
       h('button.zbtn', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
       h('button.zbtn', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
-      h('button', { 'aria-label': 'Fit content', on: { click: fitContent } }, icon('fit'))),
+    ),
     emptyEl, toolsEl);
   view.append(nb);
 
@@ -3183,6 +2975,16 @@ async function renderNotebook(view, query) {
   }
   function renderCards() {
     cardsEl.className = 'nb-cards paper-' + (settings.paper || 'grid');
+    // keep every entry on the current paper's lines: cards placed on grid paper
+    // (or before a spacing change) would otherwise sit across the ruled lines
+    if (snapOn()) {
+      let moved = false;
+      for (const c of page.cards) {
+        const x = snapX(c.x), y = snapToRule(c.y);
+        if (x !== c.x || y !== c.y) { moveCard(c, x, y); moved = true; }
+      }
+      if (moved) saveNotebook();
+    }
     cardsEl.replaceChildren(...page.cards.map(cardEl));
     selectCard(page.cards.some(c => c.id === selectedId) ? selectedId : null);
     markPicked();
@@ -3227,7 +3029,8 @@ async function renderNotebook(view, query) {
           h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
           h('button', { 'aria-label': 'Edit text', on: { click: () => editText(c) } }, icon('edit')),
           h('button', { 'aria-label': 'Text options', on: { click: () => cardMenu(c) } }, icon('more'))),
-        h('div.ncard-text', { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
+        // Large writing is nudged up a little so its tails clear the ruled line
+        h('div.ncard-text' + ((c.size || 26) >= 30 ? '.big' : ''), { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
     }
     const el = h('div.ncard' + (c.collapsed ? '.collapsed' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
       h('div.ncard-head',
@@ -4046,7 +3849,7 @@ async function renderNotebook(view, query) {
     if (c.x !== start.from.x || c.y !== start.from.y) {
       // settle the writing onto the ruled lines; it's now where the user put it
       c.auto = false;
-      moveCard(c, c.x, snapToRule(c.y));
+      if (snapOn()) moveCard(c, snapX(c.x), snapToRule(c.y));   // Settings → Snap to lines
       start.el.style.top = c.y + 'px';
       requestDraw();
     }
@@ -4146,6 +3949,8 @@ async function renderNotebook(view, query) {
       else { page.cards.splice(page.cards.indexOf(a.card), 1); page.strokes = page.strokes.filter(s => s.card !== a.card.id); }
     } else if (a.t === 'addcard') {
       if (reverse) page.cards.splice(page.cards.indexOf(a.card), 1); else page.cards.push(a.card);
+    } else if (a.t === 'lineup') {
+      for (const m of a.moves) { const c = page.cards.find(k => k.id === m.id); if (c) moveCard(c, (reverse ? m.from : m.to).x, (reverse ? m.from : m.to).y); }
     } else if (a.t === 'patch') {
       Object.assign(a.card, reverse ? a.from : a.to);
     } else if (a.t === 'eqedit') {
@@ -4231,27 +4036,96 @@ async function renderNotebook(view, query) {
     renderCards(); applyView(false); syncTools(); saveNotebook();
     history.replaceState(null, '', `#/notebook?page=${p.id}`);
   }
+  /** Line every entry on this page up with the ruling or grid (undoable). */
+  function lineUpPage() {
+    const moves = [];
+    for (const c of page.cards) {
+      const to = { x: snapX(c.x), y: snapToRule(c.y) };
+      if (to.x !== c.x || to.y !== c.y) { moves.push({ id: c.id, from: { x: c.x, y: c.y }, to }); moveCard(c, to.x, to.y); c.auto = false; }
+    }
+    if (!moves.length) { toast('Everything is already lined up'); return; }
+    undo.push({ t: 'lineup', moves }); redo = [];
+    afterHistory();
+    toast(`Lined up ${moves.length} item${moves.length === 1 ? '' : 's'}`, { label: 'Undo', fn: doUndo });
+  }
+
+  /** A small picture of a page: paper, heading, entries (title + answer) and drawings. */
+  function pageThumb(p) {
+    const W = 150, H = 200, dpr = window.devicePixelRatio || 1;
+    const cv = document.createElement('canvas');
+    cv.width = W * dpr; cv.height = H * dpr; cv.className = 'pt-canvas';
+    const g = cv.getContext('2d');
+    const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim();
+    const widthOf = c => (c.kind === 'eq' ? 400 : c.kind === 'num' ? 280 : c.kind === 'text' ? Math.min(600, 40 + 13 * Math.max(...String(c.text || '').split('\n').map(l => l.length))) : 340);
+    // show the used part of the page (at least the top-left), keeping the tile's shape
+    let right = 700, bottom = 900;
+    for (const c of p.cards) { right = Math.max(right, c.x + widthOf(c) + 20); bottom = Math.max(bottom, c.y + (c.h || estimateCardH(c)) + 20); }
+    for (const s of p.strokes) for (let i = 0; i < s.pts.length; i += 2) { right = Math.max(right, s.pts[i] + 20); bottom = Math.max(bottom, s.pts[i + 1] + 20); }
+    right = Math.min(PAGE_W, right); bottom = Math.min(PAGE_H, bottom);
+    const k = Math.min(W / right, H / bottom);
+    g.scale(dpr * k, dpr * k);
+    const style = settings.paper || 'grid';
+    g.fillStyle = tok('--paper'); g.fillRect(0, 0, W / k, H / k);
+    g.lineWidth = 1 / k;
+    if (style === 'lines') {
+      g.strokeStyle = tok('--rule');
+      for (let y = HEAD_H + 36; y < H / k; y += 36) { g.beginPath(); g.moveTo(0, y); g.lineTo(W / k, y); g.stroke(); }
+      g.strokeStyle = tok('--margin-line'); g.beginPath(); g.moveTo(MARGIN_X, 0); g.lineTo(MARGIN_X, H / k); g.stroke();
+    } else if (style === 'grid') {
+      g.strokeStyle = tok('--grid');
+      for (let y = HEAD_H; y < H / k; y += 32) { g.beginPath(); g.moveTo(0, y); g.lineTo(W / k, y); g.stroke(); }
+      for (let x = 0; x < W / k; x += 32) { g.beginPath(); g.moveTo(x, HEAD_H); g.lineTo(x, H / k); g.stroke(); }
+    }
+    g.strokeStyle = tok('--head-rule'); g.lineWidth = 3 / k; g.beginPath(); g.moveTo(0, HEAD_H); g.lineTo(W / k, HEAD_H); g.stroke();
+    const hand = getComputedStyle(document.body).getPropertyValue('--hand') || 'cursive';
+    g.fillStyle = tok('--ink-strong'); g.font = `700 64px ${hand}`; g.textBaseline = 'alphabetic';
+    g.fillText(p.name, style === 'lines' ? MARGIN_X + 22 : 40, 100, W / k - 60);
+    for (const c of p.cards) {
+      const w = widthOf(c), hgt = c.h || estimateCardH(c);
+      let title = c.title || '', answer = '';
+      if (c.kind === 'text') { title = String(c.text || '').split('\n')[0]; }
+      else if (c.kind === 'num') { title = c.label || 'Number'; answer = `${fmt(c.value)} ${c.unit || ''}`; }
+      else if (!c.kind) {
+        const r = (c.results || []).find(x => x.primary) || (c.steps || []).slice(-1).map(s => ({ text: s.r }))[0];
+        answer = r ? r.text : '';
+      }
+      g.strokeStyle = tok('--line-2'); g.lineWidth = 3 / k;
+      roundRect(g, c.x, c.y, w, Math.min(hgt, 600), 14); g.stroke();
+      g.fillStyle = c.kind === 'text' ? inkColor(c.color || '#ffffff') : tok('--ink-strong');
+      g.font = `700 ${c.kind === 'text' ? 44 : 40}px ${hand}`;
+      g.fillText(title, c.x + 14, c.y + 46, w - 28);
+      if (answer) { g.fillStyle = tok('--accent'); g.font = `700 40px ${hand}`; g.fillText(answer, c.x + 14, c.y + 100, w - 28); }
+    }
+    for (const s of p.strokes) drawStroke(g, s);
+    return cv;
+  }
+
+  // Page picker: thumbnails of every page, plus tools for the current one
   function pageSheet() {
     openSheet(close => [
       h('h3', 'Notebook pages'),
-      ...notebook.pages.map(p => h('button.list-item' + (p.id === page.id ? '.on' : ''), { on: { click: () => { close(); switchPage(p); } } },
-        icon('book'), h('div.li-main', h('div.li-title', p.name), h('div.li-sub', `${p.cards.length} calculation${p.cards.length === 1 ? '' : 's'} · ${p.strokes.length} marks`)),
-        p.id === page.id ? icon('check') : null)),
-      h('button.list-item', {
-        on: { click: async () => { close(); const name = await promptSheet('New page', '', 'Create'); if (name) switchPage(addPage(name)); } },
-      }, icon('plus'), h('div.li-main', h('div.li-title', 'New page'))),
-      h('div.row',
-        h('button.btn.small', { style: { flex: 1 }, on: { click: async () => { close(); const name = await promptSheet('Rename page', page.name); if (name) { page.name = name; saveNotebook(); renderCards(); } } } }, icon('edit'), 'Rename'),
+      h('div.page-grid',
+        ...notebook.pages.map(p => h('button.page-tile' + (p.id === page.id ? '.on' : ''), {
+          type: 'button', 'aria-label': `Open page ${p.name}`, on: { click: () => { close(); if (p.id !== page.id) switchPage(p); } },
+        }, h('div.pt-paper', pageThumb(p)),
+        h('div.pt-name', p.name),
+        h('div.pt-sub', `${p.cards.length} item${p.cards.length === 1 ? '' : 's'}`))),
+        h('button.page-tile.new', {
+          type: 'button', on: { click: async () => { close(); const name = await promptSheet('New page', '', 'Create'); if (name) switchPage(addPage(name)); } },
+        }, h('div.pt-paper', icon('plus')), h('div.pt-name', 'New page'))),
+      h('div.ts-label', `This page: ${page.name}`),
+      h('div.page-actions',
+        h('button.btn.small', { on: { click: async () => { close(); const name = await promptSheet('Rename page', page.name); if (name) { page.name = name; saveNotebook(); renderCards(); } } } }, icon('edit'), 'Rename'),
+        h('button.btn.small', { on: { click: () => { close(); lineUpPage(); } } }, icon('fit'), 'Line up'),
         h('button.btn.small', {
-          style: { flex: 1 }, disabled: !page.strokes.length,
+          disabled: !page.strokes.length,
           on: { click: () => { close(); undo.push({ t: 'clear', strokes: page.strokes.slice() }); redo = []; page.strokes = []; afterHistory(); toast('Drawings cleared', { label: 'Undo', fn: doUndo }); } },
         }, icon('eraser'), 'Clear ink'),
         h('button.btn.small.danger', {
-          style: { flex: 1 },
           on: {
             click: async () => {
               close();
-              if (await confirmSheet(`Delete “${page.name}”?`, `Its ${page.cards.length} calculation cards and drawings will be removed. Calculations stay in History.`)) {
+              if (await confirmSheet(`Delete “${page.name}”?`, `Its ${page.cards.length} items and drawings will be removed. Calculations stay in History.`)) {
                 deletePage(page.id); switchPage(getPage(notebook.lastPageId));
               }
             },
@@ -4259,6 +4133,7 @@ async function renderNotebook(view, query) {
         }, icon('trash'), 'Delete')),
     ]);
   }
+
 
   function historySheet() {
     let q = '';
@@ -4642,6 +4517,7 @@ function renderSettings(view) {
     h('div.set-group', h('h2', 'Notebook'),
       h('div.panel',
         row('Paper', null, seg('paper', [['grid', 'Grid'], ['lines', 'Lines'], ['blank', 'Blank']])),
+        row('Snap to lines', 'Entries line up with the ruling or grid when you move them', seg('snap', [['on', 'On'], ['off', 'Off']])),
         h('div.set-row.stack',
           h('div.s-text', 'Ink smoothing', h('small', 'How much pen and highlighter strokes are smoothed. Stronger looks neater but follows your finger more loosely.')),
           seg('smoothing', [['off', 'Off'], ['light', 'Light'], ['medium', 'Medium'], ['strong', 'Strong']])),
@@ -4706,7 +4582,7 @@ async function route() {
   const section = parts[0] || 'home';
   tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === (section === 'calc' ? 'home' : section)));
 
-  if (section === 'calc') renderCalc(view, parts[1], query);
+  if (section === 'calc') leaveNotebook = renderCalc(view, parts[1], query) || null;   // (also stops the GPS speedometer)
   else if (section === 'notebook') leaveNotebook = await renderNotebook(view, query);
   else if (section === 'settings') renderSettings(view);
   else renderHome(view);

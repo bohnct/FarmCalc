@@ -22,7 +22,7 @@ export function makeCtx(def, state, settings) {
 }
 
 export function selectOptions(f, v, ctx) {
-  if (f.type === 'crop') return Object.entries(CROPS).map(([value, c]) => ({ value, label: c.label }));
+  if (f.type === 'crop') return Object.entries(CROPS).filter(([id]) => !f.cropIds || f.cropIds.includes(id)).map(([value, c]) => ({ value, label: c.label }));
   return typeof f.options === 'function' ? f.options(v, ctx) : f.options;
 }
 
@@ -77,7 +77,7 @@ export function initState(def, settings, saved, prefill) {
   // selects first (crop affects unit conversions for the number fields)
   for (const f of def.fields) {
     if (fieldType(f) === 'number') continue;
-    let val = f.type === 'crop' ? settings.crop : f.def;
+    let val = f.type === 'crop' ? (f.cropIds && !f.cropIds.includes(settings.crop) ? f.cropIds[0] : settings.crop) : f.def;
     // a choice can start from the crop too (e.g. seed sold by bag for corn, by weight for wheat)
     if (f.cropDefault) {
       const crop = CROPS[def.crop || state.values.crop || settings.crop] || CROPS.wheat;

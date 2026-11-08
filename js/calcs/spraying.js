@@ -55,7 +55,6 @@ export default [
         return {
           results: [
             { label: 'Nozzle flow needed', value: gpm, dim: 'flow', decimals: 3, primary: true },
-            { label: 'Catch per nozzle in 1 min', value: gpm * 128, unit: 'fl oz', decimals: 1 },
           ],
           work: [step('Nozzle flow', 'GPA × S × W ÷ 5,940', `${n(v.gpa)} × ${n(v.speed)} × ${n(W)} ÷ 5,940`, `${n(gpm, 3)} gal/min`, true)],
           notes: ['Pick a nozzle size that gives this flow in the middle of its pressure range.'],
@@ -65,7 +64,6 @@ export default [
       return {
         results: [
           { label: 'Application rate', value: gpa, dim: 'volRate', primary: true },
-          { label: 'Catch per nozzle in 1 min', value: v.gpm * 128, unit: 'fl oz', decimals: 1 },
         ],
         work: [step('Rate', 'Q × 5,940 ÷ (S × W)', `${n(v.gpm, 3)} × 5,940 ÷ (${n(v.speed)} × ${n(W)})`, `${n(gpa)} gal/ac`, true)],
         notes: ['5,940 converts gal/min, mph and inches to gal/ac. Flow changes with √pressure: doubling flow takes 4× the pressure.'],
@@ -76,7 +74,6 @@ export default [
 
   {
     id: 'tank-mix',
-    summary: ['Product A per tank'],   // supporting results on a notebook summary card
     title: 'Tank Mix',
     category: 'spraying',
     // Reference card shown under the results: the standard W-A-L-E-S mixing order.
@@ -97,15 +94,13 @@ export default [
       { name: 'tank', label: 'Tank size', sym: 'T', dim: 'volume', unitSet: ['gal', 'L'], def: 1000, defMetric: 4000, defSk: 4500 },
       { name: 'gpa', label: 'Carrier rate', sym: 'GPA', dim: 'volRate', def: 15, defMetric: 140, defSk: 40 },
       product(1, 32), product(2, null), product(3, null),
-      { name: 'acres', label: 'Field size', sym: 'F', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v) {
       if (!(v.gpa > 0)) return fail('Carrier rate must be more than zero.');
       const acTank = v.tank / v.gpa;
       const haTank = acTank / 2.4710538147;
-      const work = [step('Acres per tank', 'T ÷ GPA', `${n(v.tank)} gal ÷ ${n(v.gpa)} gal/ac`, `${n(acTank)} ac`)];
+      const work = [step('Acres per tank', 'T ÷ GPA', `${n(v.tank)} gal ÷ ${n(v.gpa)} gal/ac`, `${n(acTank)} ac`, true)];
       const results = [{ label: 'Acres per tank', value: acTank, dim: 'area', primary: true }];
-      const tanks = v.acres ? v.acres / acTank : 0;
       [1, 2, 3].forEach(i => {
         const rate = v[`p${i}`];
         if (!rate) return;
@@ -114,19 +109,9 @@ export default [
         const per = ch.ha ? haTank : acTank;
         const amt = rate * per;
         results.push({ label: `Product ${L} per tank`, text: friendly(amt, ch.amt) });
-        work.push(step(`Product ${L} per tank`, `${L} × ${ch.ha ? 'ha' : 'ac'}/tank`, `${n(rate)} ${ch.label} × ${n(per)}`, friendly(amt, ch.amt), !v.acres && i === 1));
-        if (v.acres) {
-          const fieldAmt = rate * (ch.ha ? v.acres / 2.4710538147 : v.acres);
-          results.push({ label: `Product ${L} for field`, text: friendly(fieldAmt, ch.amt) });
-        }
+        // product per tank, worked straight from the tank size
+        work.push(step(`Product ${L} per tank`, ch.ha ? `${L} × T ÷ GPA ÷ 2.471` : `${L} × T ÷ GPA`, `${n(rate)} ${ch.label} × ${n(v.tank)} gal ÷ ${n(v.gpa)}${ch.ha ? ' ÷ 2.471' : ''}`, friendly(amt, ch.amt), true));
       });
-      if (v.acres) {
-        const full = Math.floor(tanks + 1e-9);
-        const partAc = v.acres - full * acTank;
-        results.push({ label: 'Tank loads for field', value: tanks, unit: 'tanks', decimals: 2 });
-        if (partAc > 0.01) results.push({ label: 'Last partial load', value: partAc * v.gpa, dim: 'volume' });
-        work.push(step('Loads', 'F ÷ ac/tank', `${n(v.acres)} ÷ ${n(acTank)}`, `${n(tanks, 2)} tanks`, true));
-      }
       return { results, work, notes: ['Add products in mixing order. See the card below.'] };
     },
   },

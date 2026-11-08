@@ -100,6 +100,7 @@ export function renderSettings(view) {
     h('div.set-group', h('h2', 'Notebook'),
       h('div.panel',
         row('Paper', null, seg('paper', [['grid', 'Grid'], ['lines', 'Lines'], ['blank', 'Blank']])),
+        row('Snap to lines', 'Entries line up with the ruling or grid when you move them', seg('snap', [['on', 'On'], ['off', 'Off']])),
         h('div.set-row.stack',
           h('div.s-text', 'Ink smoothing', h('small', 'How much pen and highlighter strokes are smoothed. Stronger looks neater but follows your finger more loosely.')),
           seg('smoothing', [['off', 'Off'], ['light', 'Light'], ['medium', 'Medium'], ['strong', 'Strong']])),

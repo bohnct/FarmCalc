@@ -82,7 +82,8 @@ export const ICONS = {
   yield: '<path d="M12 21V8"/><path d="M12 8c-2-1-3-3-3-5 2 0 3 2 3 5zM12 8c2-1 3-3 3-5-2 0-3 2-3 5z"/><path d="M12 13c-2-1-3.5-2.5-3.5-4.5 2 0 3.5 2 3.5 4.5zM12 13c2-1 3.5-2.5 3.5-4.5-2 0-3.5 2-3.5 4.5z"/><path d="M12 18c-2-1-3.5-2.5-3.5-4.5 2 0 3.5 2 3.5 4.5zM12 18c2-1 3.5-2.5 3.5-4.5-2 0-3.5 2-3.5 4.5z"/>',
   fieldops: '<circle cx="7" cy="17" r="3"/><circle cx="18" cy="18" r="2"/><path d="M4 14V9h7l2 5h5l1 3"/><path d="M8 9V6h3"/>',
   seeding: '<path d="M12 20v-7"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6z"/><path d="M12 15c0-3-2.5-5-6-5 0 3 2.5 5 6 5z"/><path d="M5 20h14"/>',
-  spraying: '<path d="M4 9h12v3H4z"/><path d="M16 10.5h3"/><path d="M6 12v2M10 12v2M14 12v2"/><path d="M5 16l1 4M10 16v4M15 16l-1 4"/>',
+  // spray nozzle: hex nut, tapered tip, fan of spray
+  spraying: '<path d="M9 2.5h6l1 2-1 2H9l-1-2z"/><path d="M10 6.5h4l-.8 3.5h-2.4z"/><path d="M10.2 13.2L5.5 19.5M11.1 13.6L9 21M12 13.8V21.5M12.9 13.6L15 21M13.8 13.2l4.7 6.3"/>',
   fertilizer: '<path d="M7 3h10l-2 4H9z"/><path d="M9 7c-3 2-4 5-4 8a7 7 0 0 0 14 0c0-3-1-6-4-8"/><path d="M10 14h4M12 12v4"/>',
   marketing: '<path d="M4 19h16"/><path d="M5 15l4-4 3 3 6-7"/><path d="M15 7h3v3"/>',
   convert: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',

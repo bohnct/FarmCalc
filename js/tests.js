@@ -1,6 +1,7 @@
 // Calculator math tests. Open tests.html in a browser (served over http).
 // Expected values are worked out by hand from the published formulas.
 import { getCalc, CALCS } from './registry.js';
+import { pumpGpmFromOutlet } from './calcs/fieldops.js';
 import { initState, run, snapshot, unitChoices, applyCropDefaults, formatResult } from './engine.js';
 import { fromBase, convert, findUnitByLabel, needsTestWeight } from './units.js';
 import { words } from './steps.js';
@@ -75,23 +76,14 @@ test('parseNum', () => {
 test('grain-drying', () => {
   const c = calc('grain-drying', { crop: 'corn', wet: 1000, mi: 25, mf: 15.5, loss: '' });
   close('dry bushels', c.get('Dry grain', 'bu'), 56000 * (1 - 9.5 / 84.5) / 56);
-  close('water removed lb', c.get('Water removed', 'lb'), 56000 * 9.5 / 84.5);
-  close('shrink per point', c.get('Shrink per point'), 1.18343);
+  eq('one answer, one step', `${c.r.out.results.length} ${c.r.out.work.length}`, '1 1');
   const c2 = calc('grain-drying', { crop: 'corn', wet: 1000, mi: 25, mf: 15.5, loss: 0.5 });
   close('with 0.5% handling loss', c2.get('Dry grain', 'bu'), (56000 - 56000 * 9.5 / 84.5 - 280) / 56);
 });
-test('drying-cost', () => {
-  const c = calc('drying-cost', { bu: 1000, mi: 25, mf: 15, method: 'fuel', use: 0.02, price: 1.5, other: '' });
-  close('cost per bu', c.get('Cost per bushel'), 0.30);
-  close('fuel used', c.get('Fuel used'), 200);
-  const c2 = calc('drying-cost', { bu: 1000, mi: 20, mf: 15, method: 'rate', rate: 0.04 });
-  close('custom rate total', c2.get('Total drying cost'), 200);
-});
 test('moisture-shrink', () => {
-  const c = calc('moisture-shrink', { gross: 1000, moist: 20, base: 15.5, factor: 1.4, charge: 0.04, price: 4.5 });
+  const c = calc('moisture-shrink', { gross: 1000, moist: 20, base: 15.5, factor: 1.4 });
   close('net bushels', c.get('Net (paid) grain', 'bu'), 937);
-  close('drying charge', c.get('Drying charge'), 180);
-  close('net check', c.get('Net check'), 937 * 4.5 - 180);
+  eq('one answer, one step', `${c.r.out.results.length} ${c.r.out.work.length}`, '1 1');
 });
 
 // ---------------- storage ----------------
@@ -104,11 +96,12 @@ test('bin-capacity', () => {
   close('peaked adds cone', p.get('Capacity', 'bu'), (ft3 + peak) / 1.244456);
   const f = calc('bin-capacity', { basis: 'measured', dia: 30, h: 20, top: 'funnel', repose: 23, bottom: 'flat', pack: '' });
   close('inverted cone subtracts the funnel', f.get('Capacity', 'bu'), (ft3 - peak) / 1.244456);
-  close('funnel depth', f.get('Funnel depth', 'ft'), 15 * Math.tan(23 * Math.PI / 180));
+  log(f.r.out.notes.some(t => t.startsWith('hf = funnel depth')), 'funnel depth explained in a note');
+  eq('one answer, one step', `${f.r.out.results.length} ${f.r.out.work.length}`, '1 1');
   // depth given in 44" rings: 6 rings = 22 ft
   const rg = calc('bin-capacity', { basis: 'measured', dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });
   close('6 × 44″ rings = 22 ft of grain', rg.get('Capacity', 'bu'), Math.PI * 225 * 22 / 1.244456);
-  log(rg.r.out.work[0].label === 'Sidewall height', 'work shows rings converted to feet');
+  log(rg.r.out.work[0].f.includes('rings × Rh'), 'work shows rings × ring height');
   const rc = calc('bin-capacity', { basis: 'measured', dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: 'custom', ringCustom: 39 }, US, { h: 'ring' });
   close('custom 39″ rings', rc.get('Capacity', 'bu'), Math.PI * 225 * (6 * 39 / 12) / 1.244456);
   const st = initState(getCalc('bin-capacity'), US, null, null);
@@ -153,11 +146,10 @@ test('canola-yield', () => {
   const lbAc = 6 * 60 * 18 * 43560 / (453592 / 4.5);
   const c = calc('canola-yield', { plants: 6, pods: 60, spp: 18, tsw: 4.5, loss: '' });
   close('bu/ac (50 lb/bu)', c.get('Estimated yield', 'buac'), lbAc / 50);
-  close('seeds per lb', c.get('Seeds per lb'), 453592 / 4.5);
   const l = calc('canola-yield', { plants: 6, pods: 60, spp: 18, tsw: 4.5, loss: 10 });
   close('with 10% loss', l.get('Estimated yield', 'buac'), lbAc * 0.9 / 50);
   const m = calc('canola-yield', { plants: 60, pods: 60, spp: 18, tsw: 4.5, loss: '' }, US, { plants: 'pm2' });
-  close('plants per m² input', m.get('Plants per ft²'), 60 / 10.7639);
+  close('plants per m² input', m.get('Estimated yield', 'buac'), lbAc / 6 * (60 / 10.7639) / 50);
 });
 test('wheat-yield', () => {
   const c = calc('wheat-yield', { rw: 7.5, len: 3, heads: 110, kph: 25, kpl: 14000 });
@@ -167,74 +159,73 @@ test('combine-check', () => {
   const c = calc('combine-check', { crop: 'corn', wt: 15000, moist: 18, std: 15.5, method: 'area', area: 2 });
   close('dry bu/ac', c.get('Dry yield', 'buac'), 15000 * 82 / 84.5 / 56 / 2);
   const s = calc('combine-check', { crop: 'corn', wt: 15000, moist: 18, std: 15.5, method: 'strip', len: 1000, w: 30 });
-  close('strip area', s.get('Area', 'ac'), 30000 / 43560);
+  close('strip area', s.get('Dry yield', 'buac'), 15000 * 82 / 84.5 / 56 / (30000 / 43560));
 });
 
 // ---------------- field ops ----------------
 test('field-productivity', () => {
-  const c = calc('field-productivity', { w: 40, speed: 6, eff: 75, hours: 10 });
-  close('theoretical', c.get('Theoretical capacity', 'ach'), 240 / 8.25);
-  close('effective', c.get('Effective capacity', 'ach'), 240 / 8.25 * 0.75);
+  const c = calc('field-productivity', { w: 40, speed: 6, eff: 75 });
+  close('productivity', c.get('Productivity', 'ach'), 240 / 8.25 * 0.75);
+  eq('one result only', c.r.out.results.length, 1);
+  eq('one working step', c.r.out.work.length, 1);
 });
-test('field-area', () => {
-  close('rectangle ½ × ¼ mile', calc('field-area', { shape: 'rect', l: 2640, w: 1320 }).get('Area', 'ac'), 80);
-  close('3-4-5 triangle', calc('field-area', { shape: 'tri', a: 300, b: 400, c: 500 }).get('Area', 'ac'), 60000 / 43560);
-  close('trapezoid', calc('field-area', { shape: 'trap', t1: 1320, t2: 900, th: 1320 }).get('Area', 'ac'), 1110 * 1320 / 43560);
-  close('full pivot 1300 ft', calc('field-area', { shape: 'pivot', r: 1300, arc: 360 }).get('Area', 'ac'), Math.PI * 1300 * 1300 / 43560);
-  close('half pivot', calc('field-area', { shape: 'pivot', r: 1300, arc: 180 }).get('Area', 'ac'), Math.PI * 1300 * 1300 / 43560 / 2);
+test('speedometer', () => {
+  const d = getCalc('speedometer');
+  eq('GPS only: no inputs', d.fields.length, 0);
+  eq('opens as a live tool', d.toolOnly, true);
+});
+test('crop nutrient needs (Western Canada data)', () => {
+  // 60 bu wheat, 2023 survey: uptake 1.55 N, 0.55 P2O5, 2.00 K2O, 0.19 S per bu
+  const w = calc('crop-nutrients', { crop: 'wheat', yield: 60, source: 'survey' });
+  eq('wheat uptake N-P-K-S', w.get('Crop uptake, lb/ac (N-P₂O₅-K₂O-S)'), '93-33-120-11');
+  eq('wheat removal N-P-K-S', w.get('Removed with grain, lb/ac'), '83-29-19-6');
+  // 2001 CFI values for comparison: 2.11 N/bu uptake
+  eq('wheat uptake (CFI 2001)', calc('crop-nutrients', { crop: 'wheat', yield: 60, source: 'cfi' }).get('Crop uptake, lb/ac (N-P₂O₅-K₂O-S)'), '127-48-109-14');
+  // 45 bu canola: 2.38 N, 0.90 P, 2.93 K, 0.86 S per bu uptake
+  eq('canola uptake', calc('crop-nutrients', { crop: 'canola', yield: 45, source: 'survey' }).get('Crop uptake, lb/ac (N-P₂O₅-K₂O-S)'), '107-41-132-39');
+  // durum has no 2001 CFI values: falls back to the survey and says so
+  const d = calc('crop-nutrients', { crop: 'durum', yield: 50, source: 'cfi' });
+  eq('durum falls back to survey', d.get('Crop uptake, lb/ac (N-P₂O₅-K₂O-S)').split('-')[0], '157');
+  log(d.r.out.notes[0].includes('no values'), 'says the 2001 guide has no durum values');
+  log(calc('crop-nutrients', { crop: 'pea', yield: 50, source: 'survey' }).r.out.notes[0].includes('fix'), 'pulse note');
+  eq('only crops with data offered', getCalc('crop-nutrients').fields[0].cropIds.includes('rye'), false);
+  eq('two lines of working', w.r.out.work.length, 2);
 });
 test('slough pumping', () => {
   // 300 × 150 ft oval, 3 ft deep, bowl shape; 3" pump ≈ 300 gpm at 65%
   const area = Math.PI / 4 * 300 * 150, gal = area * 3 * 0.5 * 7.48051948, gph = 300 * 60 * 0.65;
-  const c = calc('slough-pumping', { mode: 'dims', len: 300, wid: 150, depth: 3, shape: 'bowl', outlet: 3, rated: '', eff: 65, hpd: '' });
-  close('water volume (US gal)', c.get('Water volume', 'gal'), gal);
-  close('pump rate gph', c.get('Pump rate', 'gph'), gph);
+  const c = calc('slough-pumping', { mode: 'dims', len: 300, wid: 150, depth: 3, shape: 'bowl', outlet: 3, rated: '', eff: 65 });
   close('hours to pump', c.get('Time to pump'), gal / gph);
+  eq('one answer, one step', `${c.r.out.results.length} ${c.r.out.work.length}`, '1 1');
   // a known rating overrides the outlet estimate: 1 acre saucer 4 ft deep, 500 gpm at 70%
-  const k = calc('slough-pumping', { mode: 'area', area: 1, depth: 4, shape: 'saucer', outlet: 3, rated: 500, eff: 70, hpd: 10 });
+  const k = calc('slough-pumping', { mode: 'area', area: 1, depth: 4, shape: 'saucer', outlet: 3, rated: 500, eff: 70 });
   close('rated flow used', k.get('Time to pump'), 43560 * 4 / 3 * 7.48051948 / (500 * 60 * 0.7));
-  close('days at 10 h/day', k.get('Days'), 43560 * 4 / 3 * 7.48051948 / (500 * 60 * 0.7) / 10);
   // outlet size table: 2"/3"/4"/6" ratings and in-between sizes
-  const dry = getCalc('slough-pumping');
-  const q = d => { const st = initState(dry, US, null, null); st.values.outlet = String(d); return run(dry, st, US).out.results.find(r => r.label === 'Pump rate').value / 0.65; };
-  close('2″ ≈ 160 gpm', q(2), 160);
-  close('4″ ≈ 500 gpm', q(4), 500);
-  close('5″ between 4″ and 6″', q(5), 800);
-});
-test('time-to-finish', () => {
-  const c = calc('time-to-finish', { acres: 640, cap: 22, hpd: 10, machines: '' });
-  close('hours', c.get('Time needed'), 640 / 22);
-  close('days', c.get('Working days'), 640 / 22 / 10);
-  close('two machines', calc('time-to-finish', { acres: 640, cap: 22, hpd: 10, machines: 2 }).get('Time needed'), 320 / 22);
+  close('2″ ≈ 160 gpm', pumpGpmFromOutlet(2), 160);
+  close('4″ ≈ 500 gpm', pumpGpmFromOutlet(4), 500);
+  close('5″ between 4″ and 6″', pumpGpmFromOutlet(5), 800);
 });
 
 // ---------------- seeding ----------------
 test('seeding-rate', () => {
-  const c = calc('seeding-rate', { crop: 'corn', target: 34000, germ: 95, purity: 100, seedsLb: 1600, unitSize: 80000, acres: 160 }, US, { target: 'pac' });
-  close('seeds to plant', c.get('Seeds to plant', 'pac'), 34000 / 0.95);
+  const c = calc('seeding-rate', { crop: 'corn', target: 34000, germ: 95, purity: 100, seedsLb: 1600 }, US, { target: 'pac' });
   close('lb/ac', c.get('Seeding rate', 'lbac'), 34000 / 0.95 / 1600);
-  close('units/ac', c.get('Units per acre'), 34000 / 0.95 / 80000);
-  eq('whole units', c.get('Whole units to buy'), Math.ceil(34000 / 0.95 / 80000 * 160));
+  eq('one answer, one step', `${c.r.out.results.length} ${c.r.out.work.length}`, '1 1');
 });
 test('seeding rate in seeds/ft² and seeds/m²', () => {
   const W = { ...US, crop: 'wheat' };
   eq('wheat target starts at 30 seeds/ft²', initState(getCalc('seeding-rate'), W, null, null).values.target, '30');
   eq('…shown per ft² by default', initState(getCalc('seeding-rate'), W, null, null).units.target, 'pft2');
   // 30 seeds/ft² = 1,306,800/ac; PLS 95% × 98%; 14,000 seeds/lb
-  const c = calc('seeding-rate', { crop: 'wheat', target: 30, germ: 95, purity: 98, seedsLb: 14000, unitSize: '', acres: '' }, W);
+  const c = calc('seeding-rate', { crop: 'wheat', target: 30, germ: 95, purity: 98, seedsLb: 14000 }, W);
   close('lb/ac from seeds/ft²', c.get('Seeding rate', 'lbac'), 30 * 43560 / (0.95 * 0.98) / 14000);
-  close('seeds to plant per ft²', c.get('Seeds to plant', 'pft2'), 30 / (0.95 * 0.98));
-  const m = calc('seeding-rate', { crop: 'wheat', target: 300, germ: 95, purity: 100, seedsLb: 14000, unitSize: '', acres: '' }, W, { target: 'pm2' });
+  const m = calc('seeding-rate', { crop: 'wheat', target: 300, germ: 95, purity: 100, seedsLb: 14000 }, W, { target: 'pm2' });
   close('lb/ac from seeds/m²', m.get('Seeding rate', 'lbac'), 300 * 4046.8564224 / 0.95 / 14000);
-  log(c.r.out.work[0].label === 'Target per acre', 'work shows the per-acre conversion');
+  eq('work starts from seeds/ft²', c.r.out.work[0].s.startsWith('30 × 43,560'), true);
 });
 test('plant-population', () => {
-  const c = calc('plant-population', { rw: 30, len: 17.42, plants: '34+33+35', counts: 3, target: 34000 });
+  const c = calc('plant-population', { rw: 30, len: 17.42, plants: '34+33+35', counts: 3 });
   close('plants/ac', c.get('Population', 'pac'), 34 * 43560 / (17.42 * 2.5));
-});
-test('seed-cost', () => {
-  close('per unit', calc('seed-cost', { mode: 'unit', price: 300, unitSize: 80000, rate: 34000, acres: '' }).get('Seed cost', 'dac'), 127.5);
-  close('per lb', calc('seed-cost', { mode: 'lb', priceLb: 0.6, lbAc: 90, acres: '' }).get('Seed cost', 'dac'), 54);
 });
 
 // ---------------- spraying ----------------
@@ -243,39 +234,36 @@ test('sprayer-calibration', () => {
   close('GPM needed', calc('sprayer-calibration', { mode: 'gpm', gpa: 15, speed: 10, spacing: 20 }).get('Nozzle flow needed', 'gpm'), 15 * 200 / 5940);
 });
 test('tank-mix', () => {
-  const c = calc('tank-mix', { tank: 1000, gpa: 15, p1: 32, p2: '', p3: '', acres: 160 }, US, { p1: 'flozac' });
+  const c = calc('tank-mix', { tank: 1000, gpa: 15, p1: 32, p2: '', p3: '' }, US, { p1: 'flozac' });
   close('acres per tank', c.get('Acres per tank', 'ac'), 1000 / 15);
   eq('product A per tank', c.get('Product A per tank'), '2,133 fl oz (16.67 gal)');
-  close('tank loads', c.get('Tank loads for field'), 160 / (1000 / 15));
+  eq('acres and product A only', c.r.out.results.length, 2);
 });
 
 // ---------------- fertilizer ----------------
 test('fertilizer-blend', () => {
-  const c = calc('fertilizer-blend', { N: 150, P: 60, K: 90, psrc: 'map', nsrc: 'urea', nPrice: '', pPrice: '', kPrice: '', acres: '' });
+  const c = calc('fertilizer-blend', { N: 150, P: 60, K: 90, psrc: 'map', nsrc: 'urea' });
   const map = 60 / 0.52, urea = (150 - map * 0.11) / 0.46, pot = 150;
   close('MAP lb', c.get('MAP 11-52-0', 'lbac'), map);
   close('urea lb', c.get('Urea 46-0-0', 'lbac'), urea);
   close('total', c.get('Total blend', 'lbac'), map + urea + pot);
 });
 test('nitrogen-rate', () => {
-  const c = calc('nitrogen-rate', { prod: 'nh3', N: 160, price: 800, acres: '' });
+  const c = calc('nitrogen-rate', { prod: 'nh3', N: 160, price: 800 });
   close('NH3 lb/ac', c.get('Product rate', 'lbac'), 160 / 0.82);
-  close('$/lb N', c.get('Cost per lb N'), 0.4 / 0.82);
   close('$/ac', c.get('Cost per acre', 'dac'), 0.4 / 0.82 * 160);
-  const u = calc('nitrogen-rate', { prod: 'uan28', N: 100, price: '', acres: '' });
-  close('UAN28 gal/ac', u.get('Liquid rate', 'galac'), 100 / 0.28 / 10.66);
+  eq('rate only when unpriced', calc('nitrogen-rate', { prod: 'urea', N: 100, price: '' }).r.out.results.length, 1);
 });
 
 // ---------------- marketing ----------------
 test('break-even', () => {
-  const c = calc('break-even', { crop: 'corn', cost: 750, yield: 200, other: '', price: 4.5 });
+  const c = calc('break-even', { crop: 'corn', cost: 750, yield: 200, other: '' });
   close('BE price', c.get('Break-even price', 'dbu'), 3.75);
-  close('BE yield', c.get('Break-even yield', 'buac'), 750 / 4.5);
-  close('return', c.get('Return over cost', 'dac'), 150);
+  eq('one answer', c.r.out.results.length, 1);
 });
 test('cost-convert', () => {
-  close('ac → bu', calc('cost-convert', { mode: 'ac2bu', costAc: 120, yield: 200, acres: '' }).get('Cost per bushel', 'dbu'), 0.6);
-  close('bu → ac', calc('cost-convert', { mode: 'bu2ac', costBu: 0.6, yield: 200, acres: '' }).get('Cost per acre', 'dac'), 120);
+  close('ac → bu', calc('cost-convert', { mode: 'ac2bu', costAc: 120, yield: 200 }).get('Cost per bushel', 'dbu'), 0.6);
+  close('bu → ac', calc('cost-convert', { mode: 'bu2ac', costBu: 0.6, yield: 200 }).get('Cost per acre', 'dac'), 120);
 });
 
 // ---------------- convert ----------------
@@ -307,22 +295,22 @@ test('crop defaults & prefill round trip', () => {
   const st2 = initState(c.def, US, null, snap.prefill);
   eq('prefill restores wet bushels', st2.values.wet, '500');
   eq('prefill restores crop', st2.values.crop, 'soybeans');
-  log(snap.steps.length >= 3 && snap.given.length >= 4, 'snapshot has given + steps');
+  log(snap.steps.length === 1 && snap.given.length >= 4, 'snapshot has given + steps');
 });
 test('adding one step to the notebook', () => {
-  const c = calc('bin-capacity', { basis: 'measured', dia: 30, h: 20, top: 'level', bottom: 'flat', pack: '' });
+  const c = calc('crop-nutrients', { crop: 'wheat', yield: 60, source: 'survey' });
   const last = c.r.out.work.length - 1;
   const snap = snapshot(c.def, c.state, US, c.r, {}, [last]);
   eq('only the chosen step', snap.steps.length, 1);
-  eq('heading is the calculator', snap.title, 'Bin Volume');
-  eq('subtitle names the step', snap.subtitle, 'Bushels');
+  eq('heading is the calculator', snap.title, 'Crop Nutrient Needs');
+  eq('subtitle names the step', snap.subtitle, 'Removed with grain');
   log(snap.steps[0].final, 'chosen step drawn as the final answer');
   const whole = snapshot(c.def, c.state, US, c.r, {}, null);
   eq('whole calculation keeps every step', whole.steps.length, c.r.out.work.length);
-  const d = calc('grain-drying', { crop: 'corn', wet: 1000, mi: 25, mf: 15.5, loss: 0.5 });
-  const water = snapshot(d.def, d.state, US, d.r, {}, [1]);   // "W × (Mi − Mf) ÷ (100 − Mf)"
-  const syms = water.given.map(g => g.sym).filter(Boolean).sort().join(',');
-  eq('only inputs the step uses', syms, 'Mf,Mi,W');
+  const d = calc('tank-mix', { tank: 1000, gpa: 15, p1: 32, p2: '', p3: '' }, US, { p1: 'flozac' });
+  const acres = snapshot(d.def, d.state, US, d.r, {}, [0]);   // "T ÷ GPA"
+  const syms = acres.given.map(g => g.sym).filter(Boolean).sort().join(',');
+  eq('only inputs the step uses', syms, 'GPA,T');
 });
 test('reading numbers back out of entries (for equations)', () => {
   const q = t => JSON.stringify(parseQty(t));
@@ -344,28 +332,16 @@ test('Sask units', () => {
   eq('label rate in L/ac', u('tank-mix', 'p1'), 'Lac 0.5');
   eq('scale ticket in kg', u('truck-load', 'gross'), 'kg 36000');
   eq('bin diameter in ft', u('bin-capacity', 'dia'), 'ft 30');
-  eq('field area in ft', u('field-area', 'l'), 'ft 2640');
   eq('fertilizer rate in lb/ac', u('fertilizer-blend', 'N'), 'lbac 150');
-  eq('fertilizer price per tonne', st('fertilizer-blend').units.nPrice, 't');
+  eq('fertilizer price per tonne', st('nitrogen-rate').units.price, 't');
   eq('seed target per ft²', u('seeding-rate', 'target'), 'pft2 30');
-  eq('plant count target per ft²', u('plant-population', 'target'), 'pft2 25');
   eq('drill row spacing 10″', u('plant-population', 'rw'), 'in 10');
   eq('plant count starts at a wheat count', st('plant-population').values.plants, '62');
-  eq('propane in litres', u('drying-cost', 'use'), 'L 0.076');
   eq('yield in bu/ac', st('break-even').units.yield, 'buac');
   eq('working speed in km/h', u('field-productivity', 'speed'), 'kmh 9');
-  // results: bushels, tonnes for weight, ft³ for bin volume
+  // results: bin capacity in bushels
   const b = run(getCalc('bin-capacity'), st('bin-capacity'), SK);
-  const fr = label => formatResult(b.out.results.find(r => r.label === label), b.ctx).unitText;
-  eq('capacity in bu', fr('Capacity'), 'bu');
-  eq('weight in tonnes', fr('Weight'), 't (metric)');
-  eq('volume in ft³', fr('Volume'), 'ft³');
-  // drying cost with litres: 1,000 bu × 10 pts × 0.076 L × $0.60/L
-  const dc = calc('drying-cost', { bu: 1000, mi: 25, mf: 15, method: 'fuel', use: 0.076, price: 0.6, other: '' }, SK);
-  close('drying cost in litres', dc.get('Total drying cost'), 1000 * 10 * 0.076 * 0.6);
-  // mixed: price per gal with fuel in L
-  const dm = calc('drying-cost', { bu: 1000, mi: 25, mf: 15, method: 'fuel', use: 0.076, price: 2.271, other: '' }, SK, { price: 'gal' });
-  close('L of fuel priced per gal', dm.get('Total drying cost'), 1000 * 10 * 0.076 * 2.271 / 3.785411784);
+  eq('capacity in bu', formatResult(b.out.results.find(r => r.label === 'Capacity'), b.ctx).unitText, 'bu');
   // sprayer: 0.3 gpm nozzles at 20 km/h, 20″ spacing → L/ac
   const sp = calc('sprayer-calibration', { mode: 'gpa', gpm: 0.3, speed: 20, spacing: 20 }, SK);
   close('GPA from km/h', sp.get('Application rate', 'galac'), 0.3 * 5940 / (20 * 0.621371192 * 20));
@@ -377,14 +353,13 @@ test('wheat is the standard crop', () => {
   eq('…dried to wheat market moisture', vals('grain-drying').mf, '13.5');
   eq('shrink starts at 18%', vals('moisture-shrink').moist, '18');
   eq('break-even yield', vals('break-even').yield, '60');
-  eq('seed sold by weight', vals('seed-cost').mode, 'lb');
-  eq('seed rate lb/ac', vals('seed-cost').lbAc, '90');
+  eq('wheat seeding target 30 seeds/ft²', vals('seeding-rate').target, '30');
   eq('bushels to weight uses 60 lb/bu', vals('bushel-weight').tw, '60');
   // switching a calculator to corn swaps the crop-based values
-  const def = getCalc('seed-cost'); const st = initState(def, W, null, null);
+  const def = getCalc('seeding-rate'); const st = initState(def, W, null, null);
+  const wheatSeeds = st.values.seedsLb;
   st.values.crop = 'corn'; applyCropDefaults(def, st, W);
-  eq('corn seed sold by the bag', st.values.mode, 'unit');
-  eq('corn bag size', st.values.unitSize, '80000');
+  log(st.values.seedsLb !== wheatSeeds, 'switching to corn changes seeds per lb');
   const dr = calc('grain-drying', { crop: 'wheat', wet: 1000, mi: 18, mf: 13.5, loss: '' }, W);
   close('1,000 bu wheat 18 → 13.5%', dr.get('Dry grain', 'bu'), 60000 * (1 - 4.5 / 86.5) / 60);
 });
@@ -417,8 +392,9 @@ test('edit inputs keeps how the entry was made', () => {
   const st = initState(b.def, US, null, s1.prefill);
   eq('reopens in rings', st.units.h, 'ring');
   eq('reopens with 6 rings', st.values.h, '6');
-  const s2 = snapshot(b.def, b.state, US, b.r, {}, [2]);
-  eq('step pick remembered', JSON.stringify(s2.pick), '[2]');
+  const n2 = calc('crop-nutrients', { crop: 'wheat', yield: 60, source: 'survey' });
+  const s2 = snapshot(n2.def, n2.state, US, n2.r, {}, [1]);
+  eq('step pick remembered', JSON.stringify(s2.pick), '[1]');
 });
 test('summary card snapshot', () => {
   const c = calc('canola-yield', { plants: 6, pods: 60, spp: 18, tsw: 4.5, loss: '' });
@@ -431,10 +407,9 @@ test('summary card snapshot', () => {
   log(snap.steps.length === c.r.out.work.length, 'full working kept for "show working"');
   const b = calc('bin-capacity', { basis: 'measured', dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });
   const bs = snapshot(b.def, b.state, US, b.r, {}, 'summary');
-  eq('bin supporting result', bs.results.filter(r => r.sum).map(r => r.label).join(','), 'Weight');
+  eq('bin shows just its capacity', bs.results.filter(r => r.sum).length, 0);
   log(bs.given.some(g => g.text === '6 rings'), 'rings shown as entered');
-  const t = calc('time-to-finish', { acres: 640, cap: 22, hpd: 10, machines: '' });
-  eq('blank optional inputs left out', snapshot(t.def, t.state, US, t.r, {}, 'summary').given.some(g => g.label === 'Machines running'), false);
+  eq('blank optional inputs left out', snap.given.some(g => g.label === 'Pod shatter / harvest loss'), false);
 });
 test('unit dropdowns only offer practical units', () => {
   const bin = getCalc('bin-capacity').fields.find(f => f.name === 'dia');
@@ -453,7 +428,7 @@ test('unit dropdowns only offer practical units', () => {
   }
 });
 test('every calculator runs on defaults (US + metric)', () => {
-  for (const def of CALCS) {
+  for (const def of CALCS.filter(d => !d.toolOnly)) {
     for (const s of [US, METRIC, SK]) {
       const st = initState(def, s, null, null);
       const r = run(def, st, s);

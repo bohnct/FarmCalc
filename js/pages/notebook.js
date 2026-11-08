@@ -1,7 +1,7 @@
 // Notebook: a pannable/zoomable page of calculation cards with an ink layer
 // on top for pen, highlighter, straight lines/arrows and a stroke eraser.
 import { h, icon, toast, openSheet, promptSheet, confirmSheet } from '../ui.js';
-import { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } from '../store.js';
+import { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule, snapX, snapOn, estimateCardH } from '../store.js';
 import { renderSteps, renderSummary } from '../steps.js';
 import { getCalc } from '../registry.js';
 import { fmtDate, fmt, parseQty, parseNum } from '../format.js';
@@ -82,7 +82,7 @@ export async function renderNotebook(view, query) {
       // +/− only show with a mouse; on a phone you pinch to zoom (see CSS)
       h('button.zbtn', { 'aria-label': 'Zoom in', on: { click: () => zoomBy(1.25) } }, icon('plus')),
       h('button.zbtn', { 'aria-label': 'Zoom out', on: { click: () => zoomBy(0.8) } }, icon('minus')),
-      h('button', { 'aria-label': 'Fit content', on: { click: fitContent } }, icon('fit'))),
+    ),
     emptyEl, toolsEl);
   view.append(nb);
 
@@ -178,6 +178,16 @@ export async function renderNotebook(view, query) {
   }
   function renderCards() {
     cardsEl.className = 'nb-cards paper-' + (settings.paper || 'grid');
+    // keep every entry on the current paper's lines: cards placed on grid paper
+    // (or before a spacing change) would otherwise sit across the ruled lines
+    if (snapOn()) {
+      let moved = false;
+      for (const c of page.cards) {
+        const x = snapX(c.x), y = snapToRule(c.y);
+        if (x !== c.x || y !== c.y) { moveCard(c, x, y); moved = true; }
+      }
+      if (moved) saveNotebook();
+    }
     cardsEl.replaceChildren(...page.cards.map(cardEl));
     selectCard(page.cards.some(c => c.id === selectedId) ? selectedId : null);
     markPicked();
@@ -222,7 +232,8 @@ export async function renderNotebook(view, query) {
           h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
           h('button', { 'aria-label': 'Edit text', on: { click: () => editText(c) } }, icon('edit')),
           h('button', { 'aria-label': 'Text options', on: { click: () => cardMenu(c) } }, icon('more'))),
-        h('div.ncard-text', { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
+        // Large writing is nudged up a little so its tails clear the ruled line
+        h('div.ncard-text' + ((c.size || 26) >= 30 ? '.big' : ''), { style: { color: inkColor(c.color || '#ffffff'), fontSize: (c.size || 26) + 'px' } }, c.text));
     }
     const el = h('div.ncard' + (c.collapsed ? '.collapsed' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
       h('div.ncard-head',
@@ -1041,7 +1052,7 @@ export async function renderNotebook(view, query) {
     if (c.x !== start.from.x || c.y !== start.from.y) {
       // settle the writing onto the ruled lines; it's now where the user put it
       c.auto = false;
-      moveCard(c, c.x, snapToRule(c.y));
+      if (snapOn()) moveCard(c, snapX(c.x), snapToRule(c.y));   // Settings → Snap to lines
       start.el.style.top = c.y + 'px';
       requestDraw();
     }
@@ -1141,6 +1152,8 @@ export async function renderNotebook(view, query) {
       else { page.cards.splice(page.cards.indexOf(a.card), 1); page.strokes = page.strokes.filter(s => s.card !== a.card.id); }
     } else if (a.t === 'addcard') {
       if (reverse) page.cards.splice(page.cards.indexOf(a.card), 1); else page.cards.push(a.card);
+    } else if (a.t === 'lineup') {
+      for (const m of a.moves) { const c = page.cards.find(k => k.id === m.id); if (c) moveCard(c, (reverse ? m.from : m.to).x, (reverse ? m.from : m.to).y); }
     } else if (a.t === 'patch') {
       Object.assign(a.card, reverse ? a.from : a.to);
     } else if (a.t === 'eqedit') {
@@ -1226,27 +1239,96 @@ export async function renderNotebook(view, query) {
     renderCards(); applyView(false); syncTools(); saveNotebook();
     history.replaceState(null, '', `#/notebook?page=${p.id}`);
   }
+  /** Line every entry on this page up with the ruling or grid (undoable). */
+  function lineUpPage() {
+    const moves = [];
+    for (const c of page.cards) {
+      const to = { x: snapX(c.x), y: snapToRule(c.y) };
+      if (to.x !== c.x || to.y !== c.y) { moves.push({ id: c.id, from: { x: c.x, y: c.y }, to }); moveCard(c, to.x, to.y); c.auto = false; }
+    }
+    if (!moves.length) { toast('Everything is already lined up'); return; }
+    undo.push({ t: 'lineup', moves }); redo = [];
+    afterHistory();
+    toast(`Lined up ${moves.length} item${moves.length === 1 ? '' : 's'}`, { label: 'Undo', fn: doUndo });
+  }
+
+  /** A small picture of a page: paper, heading, entries (title + answer) and drawings. */
+  function pageThumb(p) {
+    const W = 150, H = 200, dpr = window.devicePixelRatio || 1;
+    const cv = document.createElement('canvas');
+    cv.width = W * dpr; cv.height = H * dpr; cv.className = 'pt-canvas';
+    const g = cv.getContext('2d');
+    const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim();
+    const widthOf = c => (c.kind === 'eq' ? 400 : c.kind === 'num' ? 280 : c.kind === 'text' ? Math.min(600, 40 + 13 * Math.max(...String(c.text || '').split('\n').map(l => l.length))) : 340);
+    // show the used part of the page (at least the top-left), keeping the tile's shape
+    let right = 700, bottom = 900;
+    for (const c of p.cards) { right = Math.max(right, c.x + widthOf(c) + 20); bottom = Math.max(bottom, c.y + (c.h || estimateCardH(c)) + 20); }
+    for (const s of p.strokes) for (let i = 0; i < s.pts.length; i += 2) { right = Math.max(right, s.pts[i] + 20); bottom = Math.max(bottom, s.pts[i + 1] + 20); }
+    right = Math.min(PAGE_W, right); bottom = Math.min(PAGE_H, bottom);
+    const k = Math.min(W / right, H / bottom);
+    g.scale(dpr * k, dpr * k);
+    const style = settings.paper || 'grid';
+    g.fillStyle = tok('--paper'); g.fillRect(0, 0, W / k, H / k);
+    g.lineWidth = 1 / k;
+    if (style === 'lines') {
+      g.strokeStyle = tok('--rule');
+      for (let y = HEAD_H + 36; y < H / k; y += 36) { g.beginPath(); g.moveTo(0, y); g.lineTo(W / k, y); g.stroke(); }
+      g.strokeStyle = tok('--margin-line'); g.beginPath(); g.moveTo(MARGIN_X, 0); g.lineTo(MARGIN_X, H / k); g.stroke();
+    } else if (style === 'grid') {
+      g.strokeStyle = tok('--grid');
+      for (let y = HEAD_H; y < H / k; y += 32) { g.beginPath(); g.moveTo(0, y); g.lineTo(W / k, y); g.stroke(); }
+      for (let x = 0; x < W / k; x += 32) { g.beginPath(); g.moveTo(x, HEAD_H); g.lineTo(x, H / k); g.stroke(); }
+    }
+    g.strokeStyle = tok('--head-rule'); g.lineWidth = 3 / k; g.beginPath(); g.moveTo(0, HEAD_H); g.lineTo(W / k, HEAD_H); g.stroke();
+    const hand = getComputedStyle(document.body).getPropertyValue('--hand') || 'cursive';
+    g.fillStyle = tok('--ink-strong'); g.font = `700 64px ${hand}`; g.textBaseline = 'alphabetic';
+    g.fillText(p.name, style === 'lines' ? MARGIN_X + 22 : 40, 100, W / k - 60);
+    for (const c of p.cards) {
+      const w = widthOf(c), hgt = c.h || estimateCardH(c);
+      let title = c.title || '', answer = '';
+      if (c.kind === 'text') { title = String(c.text || '').split('\n')[0]; }
+      else if (c.kind === 'num') { title = c.label || 'Number'; answer = `${fmt(c.value)} ${c.unit || ''}`; }
+      else if (!c.kind) {
+        const r = (c.results || []).find(x => x.primary) || (c.steps || []).slice(-1).map(s => ({ text: s.r }))[0];
+        answer = r ? r.text : '';
+      }
+      g.strokeStyle = tok('--line-2'); g.lineWidth = 3 / k;
+      roundRect(g, c.x, c.y, w, Math.min(hgt, 600), 14); g.stroke();
+      g.fillStyle = c.kind === 'text' ? inkColor(c.color || '#ffffff') : tok('--ink-strong');
+      g.font = `700 ${c.kind === 'text' ? 44 : 40}px ${hand}`;
+      g.fillText(title, c.x + 14, c.y + 46, w - 28);
+      if (answer) { g.fillStyle = tok('--accent'); g.font = `700 40px ${hand}`; g.fillText(answer, c.x + 14, c.y + 100, w - 28); }
+    }
+    for (const s of p.strokes) drawStroke(g, s);
+    return cv;
+  }
+
+  // Page picker: thumbnails of every page, plus tools for the current one
   function pageSheet() {
     openSheet(close => [
       h('h3', 'Notebook pages'),
-      ...notebook.pages.map(p => h('button.list-item' + (p.id === page.id ? '.on' : ''), { on: { click: () => { close(); switchPage(p); } } },
-        icon('book'), h('div.li-main', h('div.li-title', p.name), h('div.li-sub', `${p.cards.length} calculation${p.cards.length === 1 ? '' : 's'} · ${p.strokes.length} marks`)),
-        p.id === page.id ? icon('check') : null)),
-      h('button.list-item', {
-        on: { click: async () => { close(); const name = await promptSheet('New page', '', 'Create'); if (name) switchPage(addPage(name)); } },
-      }, icon('plus'), h('div.li-main', h('div.li-title', 'New page'))),
-      h('div.row',
-        h('button.btn.small', { style: { flex: 1 }, on: { click: async () => { close(); const name = await promptSheet('Rename page', page.name); if (name) { page.name = name; saveNotebook(); renderCards(); } } } }, icon('edit'), 'Rename'),
+      h('div.page-grid',
+        ...notebook.pages.map(p => h('button.page-tile' + (p.id === page.id ? '.on' : ''), {
+          type: 'button', 'aria-label': `Open page ${p.name}`, on: { click: () => { close(); if (p.id !== page.id) switchPage(p); } },
+        }, h('div.pt-paper', pageThumb(p)),
+        h('div.pt-name', p.name),
+        h('div.pt-sub', `${p.cards.length} item${p.cards.length === 1 ? '' : 's'}`))),
+        h('button.page-tile.new', {
+          type: 'button', on: { click: async () => { close(); const name = await promptSheet('New page', '', 'Create'); if (name) switchPage(addPage(name)); } },
+        }, h('div.pt-paper', icon('plus')), h('div.pt-name', 'New page'))),
+      h('div.ts-label', `This page: ${page.name}`),
+      h('div.page-actions',
+        h('button.btn.small', { on: { click: async () => { close(); const name = await promptSheet('Rename page', page.name); if (name) { page.name = name; saveNotebook(); renderCards(); } } } }, icon('edit'), 'Rename'),
+        h('button.btn.small', { on: { click: () => { close(); lineUpPage(); } } }, icon('fit'), 'Line up'),
         h('button.btn.small', {
-          style: { flex: 1 }, disabled: !page.strokes.length,
+          disabled: !page.strokes.length,
           on: { click: () => { close(); undo.push({ t: 'clear', strokes: page.strokes.slice() }); redo = []; page.strokes = []; afterHistory(); toast('Drawings cleared', { label: 'Undo', fn: doUndo }); } },
         }, icon('eraser'), 'Clear ink'),
         h('button.btn.small.danger', {
-          style: { flex: 1 },
           on: {
             click: async () => {
               close();
-              if (await confirmSheet(`Delete “${page.name}”?`, `Its ${page.cards.length} calculation cards and drawings will be removed. Calculations stay in History.`)) {
+              if (await confirmSheet(`Delete “${page.name}”?`, `Its ${page.cards.length} items and drawings will be removed. Calculations stay in History.`)) {
                 deletePage(page.id); switchPage(getPage(notebook.lastPageId));
               }
             },
@@ -1254,6 +1336,7 @@ export async function renderNotebook(view, query) {
         }, icon('trash'), 'Delete')),
     ]);
   }
+
 
   function historySheet() {
     let q = '';

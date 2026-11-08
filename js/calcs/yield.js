@@ -9,7 +9,6 @@ const G_PER_LB = 453.592;
 export default [
   {
     id: 'canola-yield',
-    summary: [],   // supporting results on a notebook summary card
     title: 'Canola Yield Estimate',
     category: 'yield',
     crop: 'canola',
@@ -24,27 +23,15 @@ export default [
     compute(v, ctx) {
       if (!(v.tsw > 0)) return fail('Thousand-seed weight must be more than zero.');
       const pFt2 = v.plants / 43560;               // base is plants per acre
-      const seedsFt2 = pFt2 * v.pods * v.spp;
-      const seedsLb = G_PER_LB * 1000 / v.tsw;
-      const lbAc = seedsFt2 * 43560 / seedsLb;
-      const lossPct = v.loss || 0;
-      const netLb = lbAc * (1 - lossPct / 100);
-      const bu = netLb / ctx.tw;
-      const work = [
-        step('Seeds per ft²', 'P × Po × Sp', `${n(pFt2, 2)} × ${n(v.pods)} × ${n(v.spp)}`, `${n(seedsFt2)}`),
-        step('Seeds per lb', '453,592 ÷ TSW', `453,592 ÷ ${n(v.tsw, 2)}`, `${n(seedsLb)}`),
-        step('Pounds per acre', 'seeds/ft² × 43,560 ÷ seeds/lb', `${n(seedsFt2)} × 43,560 ÷ ${n(seedsLb)}`, `${n(lbAc)} lb/ac`),
-      ];
-      if (lossPct) work.push(step('After losses', 'lb/ac × (1 − L)', `${n(lbAc)} × (1 − ${n(lossPct / 100, 3)})`, `${n(netLb)} lb/ac`));
-      work.push(step('Yield', `lb/ac ÷ ${n(ctx.tw)} lb/bu`, `${n(netLb)} ÷ ${n(ctx.tw)}`, `${n(bu, 1)} bu/ac`, true));
+      const L = (v.loss || 0) / 100;
+      // lb/ac = seeds per ft² × 43,560 ft² × grams per seed ÷ 453.592 g/lb
+      const lbAc = pFt2 * v.pods * v.spp * v.tsw / 1000 * 43560 / G_PER_LB * (1 - L);
+      const bu = lbAc / ctx.tw;
+      const f = 'P × Po × Sp × TSW × 43,560 ÷ 453,592' + (L ? ' × (1 − L)' : '') + ' ÷ test wt';
+      const sub = `${n(pFt2, 2)} × ${n(v.pods)} × ${n(v.spp)} × ${n(v.tsw, 2)} × 43,560 ÷ 453,592` + (L ? ` × (1 − ${n(L * 100)}%)` : '') + ` ÷ ${n(ctx.tw)}`;
       return {
-        results: [
-          { label: 'Estimated yield', value: netLb, dim: 'grainYield', primary: true },
-          { label: 'Plants per ft²', value: pFt2, unit: 'plants/ft²', decimals: 1 },
-          { label: 'Seeds per ft²', value: seedsFt2, unit: 'seeds/ft²', decimals: 0 },
-          { label: 'Seeds per lb', value: seedsLb, unit: 'seeds/lb', decimals: 0 },
-        ],
-        work,
+        results: [{ label: 'Estimated yield', value: lbAc, dim: 'grainYield', primary: true }],
+        work: [step('Yield', f, sub, `${n(bu, 1)} bu/ac`, true)],
         notes: ['Count several spots and average. Pre-harvest estimates often run high; a 5–15% loss allowance is common.'],
       };
     },
@@ -52,7 +39,6 @@ export default [
 
   {
     id: 'wheat-yield',
-    summary: [],   // supporting results on a notebook summary card
     title: 'Wheat Yield Estimate',
     category: 'yield',
     crop: 'wheat',
@@ -67,21 +53,11 @@ export default [
     compute(v, ctx) {
       const area = v.len * v.rw;
       if (area <= 0) return fail('Enter a row width and length.');
-      const hpf = v.heads / area;
-      const headsAc = hpf * 43560;
-      const lb = headsAc * v.kph / v.kpl;
-      const bu = lb / 60;
+      const lb = v.heads / area * 43560 * v.kph / v.kpl;
+      const bu = lb / ctx.tw;
       return {
-        results: [
-          { label: 'Estimated yield', value: bu * ctx.tw, dim: 'grainYield', primary: true },
-          { label: 'Heads per ft²', value: hpf, unit: 'heads/ft²' },
-          { label: 'Heads per acre', value: headsAc, dim: 'countRate' },
-        ],
-        work: [
-          step('Area counted', 'L × R', `${n(v.len)} ft × ${n(v.rw, 3)} ft`, `${n(area, 3)} ft²`),
-          step('Heads per ft²', 'H ÷ area', `${n(v.heads)} ÷ ${n(area, 3)}`, `${n(hpf, 1)}`),
-          step('Yield', 'heads/ft² × 43,560 × Kh ÷ Kl ÷ 60', `${n(hpf, 1)} × 43,560 × ${n(v.kph)} ÷ ${n(v.kpl)} ÷ 60`, `${n(bu, 1)} bu/ac`, true),
-        ],
+        results: [{ label: 'Estimated yield', value: lb, dim: 'grainYield', primary: true }],
+        work: [step('Yield', 'H ÷ (L × R) × 43,560 × Kh ÷ Kl ÷ test wt', `${n(v.heads)} ÷ (${n(v.len)} ft × ${n(v.rw, 3)} ft) × 43,560 × ${n(v.kph)} ÷ ${n(v.kpl)} ÷ ${n(ctx.tw)}`, `${n(bu, 1)} bu/ac`, true)],
       };
     },
   },
@@ -105,24 +81,12 @@ export default [
       if (v.std >= 100 || v.moist >= 100) return fail('Moisture must be below 100%.');
       const area = v.method === 'strip' ? v.len * v.w / 43560 : v.area;
       if (!(area > 0)) return fail('Area must be more than zero.');
-      const dry = v.wt * (100 - v.moist) / (100 - v.std);
-      const dryBu = dry / ctx.tw;
-      const yld = dryBu / area;
-      const work = [];
-      if (v.method === 'strip') work.push(step('Area', 'L × Wh ÷ 43,560', `${n(v.len)} × ${n(v.w)} ÷ 43,560`, `${n(area, 3)} ac`));
-      work.push(
-        step('Dry weight', 'W × (100 − M) ÷ (100 − Ms)', `${n(v.wt)} × (100 − ${n(v.moist)}) ÷ (100 − ${n(v.std)})`, `${n(dry)} lb`),
-        step('Dry bushels', 'dry wt ÷ test wt', `${n(dry)} ÷ ${n(ctx.tw)}`, `${n(dryBu)} bu`),
-        step('Yield', 'dry bu ÷ area', `${n(dryBu)} ÷ ${n(area, 3)} ac`, `${n(yld, 1)} bu/ac`, true),
-      );
+      const yld = v.wt * (100 - v.moist) / (100 - v.std) / ctx.tw / area;
+      const strip = v.method === 'strip';
+      const A = strip ? '(L × Wh ÷ 43,560)' : 'A', As = strip ? `(${n(v.len)} × ${n(v.w)} ÷ 43,560)` : `${n(area, 3)} ac`;
       return {
-        results: [
-          { label: 'Dry yield', value: yld * ctx.tw, dim: 'grainYield', primary: true },
-          { label: 'Dry grain', value: dry, dim: 'grain' },
-          { label: 'Wet grain', value: v.wt, dim: 'grain' },
-          { label: 'Area', value: area, dim: 'area' },
-        ],
-        work,
+        results: [{ label: 'Dry yield', value: yld * ctx.tw, dim: 'grainYield', primary: true }],
+        work: [step('Yield', `W × (100 − M) ÷ (100 − Ms) ÷ test wt ÷ ${A}`, `${n(v.wt)} lb × (100 − ${n(v.moist)}) ÷ (100 − ${n(v.std)}) ÷ ${n(ctx.tw)} ÷ ${As}`, `${n(yld, 1)} bu/ac`, true)],
       };
     },
   },

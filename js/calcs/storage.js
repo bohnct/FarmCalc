@@ -11,12 +11,10 @@ const RATING = {
   westeel: { angle: 30, pack: 5, name: 'Westeel rating' },
   sukup: { angle: 28, pack: 6, name: 'Sukup rating' },
 };
-const GAL_PER_FT3 = 7.48051948;
 
 export default [
   {
     id: 'bin-capacity',
-    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Bin Volume',
     category: 'storage',
     desc: 'Bushels in a round bin: level, peaked and hopper bottom.',
@@ -68,62 +66,35 @@ export default [
       const theta = R ? R.angle : v.repose;
       const packPct = R ? R.pack : (v.pack || 0);
       const base = Math.PI * r * r;
-      const cyl = base * H;
-      let peakH = 0, peak = 0, hopH = 0, hop = 0, funH = 0, funnel = 0;
-      const work = [];
-      if (v.hUnit === 'ring') {
-        const rings = H / (ctx.ringIn / 12);
-        work.push(step('Sidewall height', 'rings × ring height', `${n(rings)} × ${n(ctx.ringIn)}″`, `${n(H)} ft`));
-      }
-      work.push(
-        step('Floor area', 'π × r²', `3.1416 × ${n(r)}²`, `${n(base)} ft²`),
-        step('Cylinder', 'area × H', `${n(base)} × ${n(H)}`, `${n(cyl)} ft³`),
-      );
-      if (top === 'peak') {
-        peakH = r * Math.tan(deg(theta));
-        peak = base * peakH / 3;
-        work.push(step(R ? `Peak cone (${n(theta)}°)` : 'Peak cone', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(peakH)} ÷ 3`, `${n(peak)} ft³`));
-      }
-      if (top === 'funnel') {
-        // grain pulled from the center leaves an upside-down cone: subtract it
-        funH = r * Math.tan(deg(theta));
-        if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
-        funnel = base * funH / 3;
-        work.push(step('Funnel (inverted cone)', 'area × (r × tan θ) ÷ 3', `${n(base)} × ${n(funH)} ÷ 3`, `${n(funnel)} ft³`));
-      }
-      if (v.bottom === 'hopper') {
-        hopH = r * Math.tan(deg(v.hopper));
-        hop = base * hopH / 3;
-        work.push(step('Hopper cone', 'area × (r × tan α) ÷ 3', `${n(base)} × ${n(hopH)} ÷ 3`, `${n(hop)} ft³`));
-      }
-      const ft3 = cyl + peak + hop - funnel;          // physical volume
-      // packing (compaction) settles the grain in the walls; manufacturers apply it to the cylinder only
       const packF = 1 + packPct / 100;
-      const cylP = cyl * packF;
-      if (packF > 1) work.push(step(R ? `Packed walls (${n(packPct)}%)` : 'Packed walls', 'cyl × (1 + k)', `${n(cyl)} × ${n(packF, 3)}`, `${n(cylP)} ft³`));
-      const eq = cylP + peak + hop - funnel;          // grain-equivalent volume
-      const bu = eq * BU_PER_FT3;
-      // "cyl + peak + hopper − funnel", written out with whichever parts apply
-      const parts = [[packF > 1 ? 'packed' : 'cyl', cylP, '+'], ['peak', peak, '+'], ['hopper', hop, '+'], ['funnel', funnel, '−']].filter(p => p[1]);
-      if (parts.length > 1) {
-        const f = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + p[0]).join('');
-        const s = parts.map((p, i) => (i ? ` ${p[2]} ` : '') + n(p[1])).join('');
-        work.push(step('Total', f, s, `${n(eq)} ft³`));
-      }
-      work.push(step('Bushels', 'ft³ × 0.8036', `${n(eq)} × 0.8036`, `${n(bu)} bu`, true));
+      const ring = v.hUnit === 'ring';
+      const ringFt = ctx.ringIn / 12, rings = H / ringFt;
+      const tan = a => r * Math.tan(deg(a));
+      const peakH = top === 'peak' ? tan(theta) : 0;
+      const funH = top === 'funnel' ? tan(theta) : 0;
+      const hopH = v.bottom === 'hopper' ? tan(v.hopper) : 0;
+      if (funH > H) return fail(`The funnel would be ${n(funH)} ft deep, deeper than the ${n(H)} ft of grain at the wall. Check the depth or angle.`);
+      // bushels = π r² × (wall height × packing + peak ÷ 3 + hopper ÷ 3 − funnel ÷ 3) × 0.8036
+      const depth = H * packF + peakH / 3 + hopH / 3 - funH / 3;
+      const bu = base * depth * BU_PER_FT3;
+      const terms = [[(ring ? 'rings × Rh' : 'H') + (packF > 1 ? ' × k' : ''), (ring ? `${n(rings)} × ${n(ringFt, 3)}` : n(H)) + (packF > 1 ? ` × ${n(packF, 3)}` : ''), '+']];
+      if (peakH) terms.push(['hp ÷ 3', `${n(peakH)} ÷ 3`, '+']);
+      if (hopH) terms.push(['hh ÷ 3', `${n(hopH)} ÷ 3`, '+']);
+      if (funH) terms.push(['hf ÷ 3', `${n(funH)} ÷ 3`, '−']);
+      const join = k => terms.map((t, i) => (i ? ` ${t[2]} ` : '') + t[k]).join('');
+      const wrap = x => (terms.length > 1 ? `(${x})` : x);
+      const work = [step('Bushels', `π × r² × ${wrap(join(0))} × 0.8036`, `π × ${n(r)}² × ${wrap(join(1))} × 0.8036`, `${n(bu)} bu`, true)];
+      const notes = [];
+      if (ring) notes.push(`Rh = ${n(ctx.ringIn)}″ ring = ${n(ringFt, 3)} ft.`);
+      if (packF > 1) notes.push(`k = ${n(packPct)}% packing in the walls.`);
+      if (peakH) notes.push(`hp = peak height = r × tan ${n(theta)}° = ${n(peakH)} ft.`);
+      if (hopH) notes.push(`hh = hopper depth = r × tan ${n(v.hopper)}° = ${n(hopH)} ft.`);
+      if (funH) notes.push(`hf = funnel depth = r × tan ${n(theta)}° = ${n(funH)} ft.`);
+      notes.push(R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.');
       return {
-        results: [
-          { label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
-          { label: 'Per foot of depth', value: base * BU_PER_FT3 * packF, unit: 'bu/ft' },
-          ...(v.hUnit === 'ring' ? [{ label: `Per ${n(ctx.ringIn)}″ ring`, value: base * (ctx.ringIn / 12) * BU_PER_FT3 * packF, unit: 'bu/ring', decimals: 0 }] : []),
-          ...(peak ? [{ label: 'Peak height', value: peakH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          ...(funnel ? [{ label: 'Funnel depth', value: funH, dim: 'length', unitSet: ['ft', 'm'] }, { label: 'Grain removed by funnel', value: funnel * BU_PER_FT3 * ctx.tw, dim: 'grain' }] : []),
-          ...(hop ? [{ label: 'Hopper depth', value: hopH, dim: 'length', unitSet: ['ft', 'm'] }] : []),
-          { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
+        results: [{ label: 'Capacity', value: bu * ctx.tw, dim: 'grain', primary: true }],
         work,
-        notes: [R ? `${R.name}: grain peaked at ${R.angle}° with ${R.pack}% packing in the walls, as on the spec sheet. Pick “As measured” for what's actually in the bin.` : '1 bushel = 1.2445 ft³, so 1 ft³ = 0.8036 bu.'],
+        notes,
         links: [{ calc: 'grain-drying', label: 'Grain drying', values: { crop: v.crop, wet: bu * ctx.tw } }],
       };
     },
@@ -131,7 +102,6 @@ export default [
 
   {
     id: 'grain-pile',
-    summary: ['Weight'],   // supporting results on a notebook summary card
     title: 'Grain Pile Volume',
     category: 'storage',
     desc: 'Bushels in a cone pile or a long ridge pile on the ground.',
@@ -145,46 +115,30 @@ export default [
     ],
     compute(v, ctx) {
       const t = Math.tan(deg(v.repose));
-      let ft3, h, work;
+      let bu, work, h;
       if (v.shape === 'ridge') {
         const r = v.w / 2;
         if (v.len < v.w) return fail('Length must be at least the width for a ridge pile.');
         h = r * t;
-        const mid = (v.w * h / 2) * (v.len - v.w);
-        const ends = Math.PI * r * r * h / 3;
-        ft3 = mid + ends;
-        work = [
-          step('Height', '(W ÷ 2) × tan θ', `${n(r)} × tan ${n(v.repose)}°`, `${n(h)} ft`),
-          step('Middle (prism)', '(W × h ÷ 2) × (L − W)', `(${n(v.w)} × ${n(h)} ÷ 2) × (${n(v.len)} − ${n(v.w)})`, `${n(mid)} ft³`),
-          step('Two half-cone ends', 'π × r² × h ÷ 3', `3.1416 × ${n(r)}² × ${n(h)} ÷ 3`, `${n(ends)} ft³`),
-          step('Bushels', '(prism + ends) × 0.8036', `${n(ft3)} × 0.8036`, `${n(ft3 * BU_PER_FT3)} bu`, true),
-        ];
+        // a prism in the middle plus two half-cone ends (one whole cone)
+        bu = h * (v.w * (v.len - v.w) / 2 + Math.PI * r * r / 3) * BU_PER_FT3;
+        work = [step('Bushels', 'h × [W × (L − W) ÷ 2 + π × r² ÷ 3] × 0.8036', `${n(h)} × [${n(v.w)} × (${n(v.len)} − ${n(v.w)}) ÷ 2 + π × ${n(r)}² ÷ 3] × 0.8036`, `${n(bu)} bu`, true)];
       } else {
         const r = v.dia / 2;
         h = r * t;
-        ft3 = Math.PI * r * r * h / 3;
-        work = [
-          step('Height', 'r × tan θ', `${n(r)} × tan ${n(v.repose)}°`, `${n(h)} ft`),
-          step('Cone volume', 'π × r² × h ÷ 3', `3.1416 × ${n(r)}² × ${n(h)} ÷ 3`, `${n(ft3)} ft³`),
-          step('Bushels', 'ft³ × 0.8036', `${n(ft3)} × 0.8036`, `${n(ft3 * BU_PER_FT3)} bu`, true),
-        ];
+        bu = Math.PI * r * r * h / 3 * BU_PER_FT3;
+        work = [step('Bushels', 'π × r² × h ÷ 3 × 0.8036', `π × ${n(r)}² × ${n(h)} ÷ 3 × 0.8036`, `${n(bu)} bu`, true)];
       }
-      const bu = ft3 * BU_PER_FT3;
       return {
-        results: [
-          { label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true },
-          { label: 'Pile height', value: h, dim: 'length', unitSet: ['ft', 'm'] },
-          { label: 'Volume', value: ft3 * GAL_PER_FT3, dim: 'volume', units: { us: 'ft3', metric: 'm3', sk: 'ft3' }, unitSet: ['ft3', 'm3'] },
-          { label: 'Weight', value: bu * ctx.tw, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
+        results: [{ label: 'Pile capacity', value: bu * ctx.tw, dim: 'grain', primary: true }],
         work,
+        notes: [`h = pile height = ${v.shape === 'ridge' ? 'W ÷ 2' : 'r'} × tan ${n(v.repose)}° = ${n(h)} ft.`],
       };
     },
   },
 
   {
     id: 'truck-load',
-    summary: ['Net tons'],   // supporting results on a notebook summary card
     title: 'Truck / Wagon Load',
     category: 'storage',
     desc: 'Scale ticket weights to net bushels and tons.',
@@ -198,15 +152,8 @@ export default [
       if (net <= 0) return fail('Gross weight must be more than tare weight.');
       const bu = net / ctx.tw;
       return {
-        results: [
-          { label: 'Net grain', value: net, dim: 'grain', primary: true },
-          { label: 'Net weight', value: net, dim: 'mass' },
-          { label: 'Net tons', value: net, dim: 'mass', units: { us: 'ton', metric: 't' } },
-        ],
-        work: [
-          step('Net weight', 'G − T', `${n(v.gross)} − ${n(v.tare)}`, `${n(net)} lb`),
-          step('Bushels', 'net ÷ test wt', `${n(net)} ÷ ${n(ctx.tw)} lb/bu`, `${n(bu)} bu`, true),
-        ],
+        results: [{ label: 'Net grain', value: net, dim: 'grain', primary: true }],
+        work: [step('Bushels', '(G − T) ÷ test wt', `(${n(v.gross)} − ${n(v.tare)}) ÷ ${n(ctx.tw)} lb/bu`, `${n(bu)} bu`, true)],
         links: [{ calc: 'moisture-shrink', label: 'Moisture shrink', values: { crop: v.crop, gross: net } }],
       };
     },

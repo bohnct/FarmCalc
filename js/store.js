@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   paper: 'grid',         // 'grid' | 'lines' | 'blank'
   smoothing: 'medium',   // ink smoothing for pen & highlighter: 'off' | 'light' | 'medium' | 'strong'
   hidden: [],            // calculator ids hidden from the home screen (still usable via links/notebook)
+  snap: 'on',            // notebook: line entries up with the ruling/grid when moved
   theme: 'night',        // 'night' | 'day' | 'auto' (follow the phone)
 };
 
@@ -110,13 +111,25 @@ export const PAGE_H = 2000;
 export const HEAD_H = 150;      // page heading band at the top of the paper
 export const MARGIN_X = 110;    // left of the margin line (clears the ring holes)
 export const RULE = 36;         // ruled-line spacing on lined paper
-export const ROW_OFFSET = 8;    // where a card's first line starts inside a ruled row (puts the writing on the rule)
+export const ROW_OFFSET = 2;    // where a card's first line starts inside a ruled row: the rule then runs just under
+                                // the lowest letters (g, y, commas) and under the answer boxes, never through them
 const CARD_W = 340;
 const COLS = [MARGIN_X + 14, MARGIN_X + 14 + CARD_W + 20, MARGIN_X + 14 + 2 * (CARD_W + 20)];
 
 /** Snap a card's top so its lines of writing sit on the ruled lines. */
+export const GRID = 32;         // grid paper square size
+const GRID_OFFSET = 0;          // each line of writing fills one grid square, between two grid lines
 export function snapToRule(y) {
+  if (settings.paper === 'grid') return HEAD_H + GRID_OFFSET + Math.max(0, Math.round((y - HEAD_H - GRID_OFFSET) / GRID)) * GRID;
+  if (settings.paper === 'blank') return Math.round(Math.max(HEAD_H + ROW_OFFSET, y));
   return HEAD_H + ROW_OFFSET + Math.max(0, Math.round((y - HEAD_H - ROW_OFFSET) / RULE)) * RULE;
+}
+/** Left edge: on grid paper, line the writing up with a grid column. */
+export function snapX(x) {
+  return settings.paper === 'grid' ? Math.round((x + 8) / GRID) * GRID - 8 : Math.round(x);
+}
+/** Settings → Snap to lines (on unless turned off). */
+export function snapOn() { return settings.snap !== 'off';
 }
 
 /** Rough card height (one ruled row per written line) for cards not yet measured on screen. */

@@ -7,6 +7,7 @@ import {
 } from '../engine.js';
 import { renderSteps } from '../steps.js';
 import { practicalUnits, unitLabel } from '../units.js';
+import { gpsSpeedometer } from '../speedo.js';
 
 /** A unit chip: each tap moves to the next unit in its (short, practical) list. */
 function unitToggle(cls, options, current, onChange, aria) {
@@ -23,6 +24,18 @@ export function renderCalc(view, id, query) {
   const def = getCalc(id);
   if (!def) { view.append(h('div.empty', 'Calculator not found.'), h('a.btn', { href: '#/' }, 'Back to calculators')); return; }
   pushRecentCalc(id);
+  // a live tool with no inputs (Speedometer): just the tool itself
+  if (def.toolOnly) {
+    const tool = gpsSpeedometer(settings);
+    view.append(
+      h('header.topbar',
+        h('a.icon-btn.plain', { href: '#/', 'aria-label': 'Back' }, icon('back')),
+        h('h1', def.title),
+        h('span.icon-btn.plain', { 'aria-hidden': 'true' })),
+      h('p.calc-desc', def.desc),
+      tool.el);
+    return () => tool.stop();
+  }
 
   let prefill = null;
   if (query.get('p')) { try { prefill = JSON.parse(query.get('p')); } catch { prefill = null; } }
@@ -38,6 +51,8 @@ export function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
+  // live tools shown above the inputs (Speedometer: GPS)
+  const gps = def.widget === 'gps' ? gpsSpeedometer(settings) : null;
   // optional reference card (e.g. Tank Mix: mixing order); open unless folded away before
   let infoEl = null;
   if (def.info) {
@@ -154,7 +169,15 @@ export function renderCalc(view, id, query) {
       resultsEl.append(h('div.result-row', h('span.r-label', x.label), h('span.r-value', fr.valueText, fr.unitText ? ' ' : '', unitButton(x, fr, ''))));
     }
     (r.out.warn || []).forEach(w => resultsEl.append(h('div.result-warn', '⚠ ' + w)));
-    (r.out.notes || []).forEach(nt => resultsEl.append(h('div.result-note', nt)));
+    // extra info (spec-sheet basis, constants, sources) folds away under a small toggle
+    const notes = r.out.notes || [];
+    if (notes.length) {
+      const more = h('details.result-more', { open: prefs.get('notesOpen', false) },
+        h('summary', icon('chevR'), 'Details'),
+        notes.map(nt => h('div.result-note', nt)));
+      more.addEventListener('toggle', () => prefs.set('notesOpen', more.open));
+      resultsEl.append(more);
+    }
 
     const stepsEl = renderSteps({ steps: r.out.work }, { given: false });
     // a "+" on each step adds just that calculation to the notebook
@@ -276,6 +299,7 @@ export function renderCalc(view, id, query) {
       h('h1', def.title),
       h('button.icon-btn.plain', { 'aria-label': 'Reset to defaults', title: 'Reset', on: { click: reset } }, icon('reset'))),
     h('p.calc-desc', def.desc),
+    gps ? gps.el : null,
     editing ? h('div.edit-banner', icon('edit'), h('span', 'Editing a notebook entry. Change any value, then tap ', h('b', 'Update'), '.')) : null,
     fieldsEl,
     resultsEl,
@@ -287,4 +311,6 @@ export function renderCalc(view, id, query) {
   drawFields();
   update();
   if (prefill) save();
+  // stop live tools (GPS) when you leave the page
+  return () => { if (gps) gps.stop(); };
 }
