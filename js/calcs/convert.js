@@ -38,14 +38,14 @@ export default [
           { label: `${n(value)} ${fl} =`, value: out, unit: tl, primary: true, decimals: Math.abs(out) < 1 ? 6 : undefined },
           ...allRows(dim, value, from, ctx).filter(r => r.label !== tl),
         ],
-        work: [step(`${fl} → ${tl}`, dim === 'temperature' ? factorText(dim, from, to, ctx) : `x ${factorText(dim, from, to, ctx)}`, dim === 'temperature' ? `x = ${n(value)} ${fl}` : `${n(value)} ${factorText(dim, from, to, ctx)}`, `${n(out, Math.abs(out) < 1 ? 6 : undefined)} ${tl}`, true)],
+        work: [step(`${fl} to ${tl}`, dim === 'temperature' ? factorText(dim, from, to, ctx) : `x ${factorText(dim, from, to, ctx)}`, dim === 'temperature' ? `x = ${n(value)} ${fl}` : `${n(value)} ${factorText(dim, from, to, ctx)}`, `${n(out, Math.abs(out) < 1 ? 6 : undefined)} ${tl}`, true)],
       };
     },
   },
 
   {
     id: 'bushel-weight',
-    title: 'Bushels ↔ Weight',
+    title: 'Bushels to Weight',
     category: 'convert',
     desc: 'Bushels, pounds, tons and tonnes by crop test weight; also yields and prices.',
     fields: [
@@ -65,7 +65,7 @@ export default [
       const fl = unitLabel(dim, v.from, ctx.cur);
       return {
         results: [{ ...first, primary: true, label: `${n(v.value)} ${fl} =` }, ...rows.slice(1)],
-        work: [step(`${fl} → ${first.unit}`, `x ${factorText(dim, v.from, Object.keys(DIMS[dim].units).find(u => unitLabel(dim, u, ctx.cur) === first.unit), ctx)}`, `${n(v.value)} ${fl} @ ${n(ctx.tw)} lb/bu`, `${n(first.value)} ${first.unit}`, true)],
+        work: [step(`${fl} to ${first.unit}`, `x ${factorText(dim, v.from, Object.keys(DIMS[dim].units).find(u => unitLabel(dim, u, ctx.cur) === first.unit), ctx)}`, `${n(v.value)} ${fl} @ ${n(ctx.tw)} lb/bu`, `${n(first.value)} ${first.unit}`, true)],
         notes: [`Using ${n(ctx.tw)} lb per bushel.`, ...(dim === 'grain' ? [`= ${n(base)} lb`] : [])],
       };
     },

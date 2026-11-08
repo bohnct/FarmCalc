@@ -181,10 +181,10 @@ export function renderCalc(view, id, query) {
       draw();
       return [
         h('h3', `${def.title}: what to add?`),
-        // Summary card: your inputs written out, then the answer (working folded away on the card)
+        // Summary card: your inputs written out, then the answer (the working stays in the calculator)
         h('button.list-item.summary-opt', { type: 'button', on: { click: () => { close(); choosePage('summary'); } } },
           icon('note'),
-          h('div.li-main', h('div.li-title', 'Summary'), h('div.li-sub', 'Your inputs, then the answer · working tucked away')),
+          h('div.li-main', h('div.li-title', 'Summary'), h('div.li-sub', 'Your inputs, then the answer · open the calculator to see the working')),
           icon('chevR')),
         h('div.sheet-divider', 'or the working, step by step'),
         list,

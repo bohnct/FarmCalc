@@ -1,8 +1,9 @@
 // Calculator math tests. Open tests.html in a browser (served over http).
 // Expected values are worked out by hand from the published formulas.
 import { getCalc, CALCS } from './registry.js';
-import { initState, run, snapshot, unitChoices } from './engine.js';
-import { fromBase, convert } from './units.js';
+import { initState, run, snapshot, unitChoices, applyCropDefaults } from './engine.js';
+import { fromBase, convert, findUnitByLabel, needsTestWeight } from './units.js';
+import { words } from './steps.js';
 import { parseNum, parseQty } from './format.js';
 
 const out = document.getElementById('out');
@@ -282,6 +283,45 @@ test('reading numbers back out of entries (for equations)', () => {
   eq('percent', q('11.74 %'), JSON.stringify({ value: 11.74, unit: '%' }));
   eq('analysis is not a quantity', parseQty('11-52-0'), null);
   eq('h m is not a quantity', parseQty('7 h 18 m'), null);
+});
+test('wheat is the standard crop', () => {
+  const W = { ...US, crop: 'wheat' };
+  const vals = id => initState(getCalc(id), W, null, null).values;
+  eq('drying starts at wheat harvest moisture', vals('grain-drying').mi, '18');
+  eq('…dried to wheat market moisture', vals('grain-drying').mf, '13.5');
+  eq('shrink starts at 18%', vals('moisture-shrink').moist, '18');
+  eq('break-even yield', vals('break-even').yield, '60');
+  eq('seed sold by weight', vals('seed-cost').mode, 'lb');
+  eq('seed rate lb/ac', vals('seed-cost').lbAc, '90');
+  eq('bushels to weight uses 60 lb/bu', vals('bushel-weight').tw, '60');
+  // switching a calculator to corn swaps the crop-based values
+  const def = getCalc('seed-cost'); const st = initState(def, W, null, null);
+  st.values.crop = 'corn'; applyCropDefaults(def, st, W);
+  eq('corn seed sold by the bag', st.values.mode, 'unit');
+  eq('corn bag size', st.values.unitSize, '80000');
+  const dr = calc('grain-drying', { crop: 'wheat', wet: 1000, mi: 18, mf: 13.5, loss: '' }, W);
+  close('1,000 bu wheat 18 → 13.5%', dr.get('Dry grain', 'bu'), 60000 * (1 - 4.5 / 86.5) / 60);
+});
+test('converting a number from the notebook', () => {
+  const u = l => JSON.stringify(findUnitByLabel(l));
+  eq('bu is grain (uses test weight)', u('bu'), JSON.stringify({ dim: 'grain', unit: 'bu' }));
+  eq('t is grain tonnes', u('t'), JSON.stringify({ dim: 'grain', unit: 't' }));
+  eq('ton (short) label', u('ton'), JSON.stringify({ dim: 'grain', unit: 'ton' }));
+  eq('yield', u('bu/ac'), JSON.stringify({ dim: 'grainYield', unit: 'buac' }));
+  eq('price', u('$/bu'), JSON.stringify({ dim: 'grainPrice', unit: 'dbu' }));
+  eq('acres', u('ac'), JSON.stringify({ dim: 'area', unit: 'ac' }));
+  eq('cubic feet', u('ft³'), JSON.stringify({ dim: 'volume', unit: 'ft3' }));
+  eq('unknown unit', findUnitByLabel('pods'), null);
+  log(needsTestWeight('grain', 'bu', 't'), 'bu → t needs test weight');
+  log(!needsTestWeight('grain', 'lb', 't'), 'lb → t does not');
+  // 27,555 bu of corn at 56 lb/bu = 1,543,080 lb = 699.9 t
+  close('27,555 bu corn → t', convert('grain', 27555, 'bu', 't', { tw: 56 }), 27555 * 56 / 2204.62262);
+  close('…at a measured 54 lb/bu', convert('grain', 27555, 'bu', 't', { tw: 54 }), 27555 * 54 / 2204.62262);
+});
+test('handwritten text has no arrow glyphs', () => {
+  eq('old title tidied', words('Bushels ↔ Weight'), 'Bushels & Weight');
+  eq('arrow as "to"', words('Per acre → per bushel'), 'Per acre to per bushel');
+  log(!CALCS.some(c => /[↔→]/.test(c.title)), 'no calculator title uses an arrow glyph');
 });
 test('edit inputs keeps how the entry was made', () => {
   const b = calc('bin-capacity', { dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });

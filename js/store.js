@@ -6,7 +6,7 @@ import { setDecimals } from './format.js';
 const SETTINGS_KEY = 'farmcalc.settings';
 const DEFAULT_SETTINGS = {
   system: 'us',          // 'us' | 'metric'
-  crop: 'corn',
+  crop: 'wheat',         // default crop for every calculator (Settings → Default crop)
   decimals: 'auto',      // 'auto' | '0'..'4'
   currency: '$',
   paper: 'grid',         // 'grid' | 'lines' | 'blank'
@@ -20,6 +20,25 @@ function lsSet(key, val) { try { localStorage.setItem(key, val); } catch { /* st
 
 export const settings = { ...DEFAULT_SETTINGS, ...safeJSON(lsGet(SETTINGS_KEY)) };
 setDecimals(settings.decimals);
+
+// One-time switch from the old corn default to wheat. Calculators whose last
+// inputs were left on corn start fresh, so they open with wheat values
+// (test weight, moisture, yield...). Runs once; picking corn again later sticks.
+(function switchDefaultCropToWheat() {
+  const FLAG = 'farmcalc.migrated.wheatDefault';
+  if (lsGet(FLAG)) return;
+  lsSet(FLAG, '1');
+  if (settings.crop !== 'corn') return;
+  settings.crop = 'wheat';
+  lsSet(SETTINGS_KEY, JSON.stringify(settings));
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (!k.startsWith('farmcalc.inputs.')) continue;
+      const saved = safeJSON(localStorage.getItem(k));
+      if (saved?.v?.values?.crop === 'corn') localStorage.removeItem(k);
+    }
+  } catch { /* storage unavailable */ }
+})();
 
 export function saveSettings(patch) {
   Object.assign(settings, patch);
@@ -94,8 +113,10 @@ export function estimateCardH(c) {
   const wrap = t => Math.max(1, Math.ceil(String(t || '').length / 26));   // ~26 handwritten chars per line
   if (c.kind === 'text') return String(c.text || '').split('\n').reduce((n, l) => n + wrap(l), 0) * RULE + 8;
   if (c.kind === 'eq') return ((c.terms?.length || 0) + 3) * RULE + 12;
-  // summary: title, one row per input, the answer, supporting results, "show working"
-  if (c.style === 'summary') return (3 + (c.given?.length || 0) + (c.results || []).filter(r => r.sum).length) * RULE + 12;
+  if (c.kind === 'conv') return 6 * RULE + 12;
+  if (c.kind === 'num') return RULE + 12;
+  // summary: title, one row per input, the answer, supporting results
+  if (c.style === 'summary') return (2 + (c.given?.length || 0) + (c.results || []).filter(r => r.sum).length) * RULE + 12;
   let rows = 1 + (c.given?.length ? c.given.length + 1 : 0);
   for (const s of c.steps || []) rows += 1 + (s.f ? wrap(s.f) : 0) + (s.s && s.s !== s.f ? wrap('= ' + s.s) : 0) + wrap('= ' + s.r);
   return rows * RULE + 12;

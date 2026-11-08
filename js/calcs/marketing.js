@@ -9,10 +9,10 @@ export default [
     desc: 'Price per bushel to cover costs, and break-even yield at a price.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'cost', label: 'Total cost', sym: 'C', dim: 'moneyArea', money: true, def: 750, defMetric: 1850 },
-      { name: 'yield', label: 'Expected yield', sym: 'Y', dim: 'grainYield', def: 200, defMetric: 12.5 },
+      { name: 'cost', label: 'Total cost', sym: 'C', dim: 'moneyArea', money: true, def: 300, defMetric: 740 },
+      { name: 'yield', label: 'Expected yield', sym: 'Y', dim: 'grainYield', def: 60, cropDefault: 'yld' },
       { name: 'other', label: 'Other income', sym: 'O', dim: 'moneyArea', money: true, def: 0, optional: true, help: 'Program payments, insurance, straw, etc.' },
-      { name: 'price', label: 'Expected price', sym: 'P', dim: 'grainPrice', def: 4.5, optional: true },
+      { name: 'price', label: 'Expected price', sym: 'P', dim: 'grainPrice', def: 6, cropDefault: 'price', optional: true },
     ],
     compute(v, ctx) {
       const yBu = v.yield / ctx.tw;
@@ -40,15 +40,15 @@ export default [
 
   {
     id: 'cost-convert',
-    title: 'Cost per Acre ↔ Bushel',
+    title: 'Cost per Acre & Bushel',
     category: 'marketing',
     desc: 'Turn a cost per acre into a cost per bushel, or the other way.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'mode', label: 'Convert', type: 'select', def: 'ac2bu', options: [{ value: 'ac2bu', label: 'Per acre → per bushel' }, { value: 'bu2ac', label: 'Per bushel → per acre' }] },
+      { name: 'mode', label: 'Convert', type: 'select', def: 'ac2bu', options: [{ value: 'ac2bu', label: 'Per acre to per bushel' }, { value: 'bu2ac', label: 'Per bushel to per acre' }] },
       { name: 'costAc', label: 'Cost per acre', sym: 'C', dim: 'moneyArea', money: true, def: 120, defMetric: 300, show: v => v.mode === 'ac2bu' },
       { name: 'costBu', label: 'Cost per bushel', sym: 'C', dim: 'grainPrice', def: 0.6, show: v => v.mode === 'bu2ac' },
-      { name: 'yield', label: 'Yield', sym: 'Y', dim: 'grainYield', def: 200, defMetric: 12.5 },
+      { name: 'yield', label: 'Yield', sym: 'Y', dim: 'grainYield', def: 60, cropDefault: 'yld' },
       { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v, ctx) {

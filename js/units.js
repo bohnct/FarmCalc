@@ -206,4 +206,38 @@ export function unitList(dim, only) {
   return only ? ids.filter(id => only.includes(id)) : ids;
 }
 
+/**
+ * Find the unit behind a label as it appears on a result ("bu", "t", "$/bu", "ft³").
+ * Grain dimensions are checked first so "bu", "lb" and "t" convert with the crop's
+ * test weight (they include every weight unit too). Returns { dim, unit } or null.
+ */
+export function findUnitByLabel(label, currency = '$') {
+  const want = String(label || '').trim();
+  if (!want) return null;
+  const order = ['grain', 'grainYield', 'grainPrice', ...Object.keys(DIMS).filter(d => !DIMS[d].crop)];
+  for (const dim of order) {
+    for (const id of Object.keys(DIMS[dim].units)) {
+      const l = unitLabel(dim, id, currency).replace(/\s*\(.*\)$/, '');
+      if (l === want) return { dim, unit: id };
+    }
+  }
+  return null;
+}
+
+/** Does converting between these two units need the crop's test weight (e.g. bu → t)? */
+export function needsTestWeight(dim, a, b) {
+  return !!DIMS[dim]?.crop && [a, b].some(u => typeof DIMS[dim].units[u]?.f === 'function');
+}
+
+// Plain-English names for the convert picker
+export const UNIT_NAMES = {
+  bu: 'bushels', lb: 'pounds', cwt: 'hundredweight', ton: 'short tons', kg: 'kilograms', t: 'metric tonnes',
+  g: 'grams', oz: 'ounces', buac: 'bushels / acre', lbac: 'pounds / acre', tonac: 'tons / acre', kgha: 'kg / hectare',
+  tha: 'tonnes / hectare', qha: 'quintals / hectare', dbu: 'per bushel', dcwt: 'per cwt', dton: 'per short ton', dt: 'per tonne',
+  ac: 'acres', ha: 'hectares', ft2: 'square feet', m2: 'square metres', gal: 'US gallons', L: 'litres', ft3: 'cubic feet', m3: 'cubic metres',
+  ft: 'feet', m: 'metres', in: 'inches', cm: 'centimetres', yd: 'yards', mi: 'miles', km: 'kilometres', ring: 'bin rings',
+  galac: 'gallons / acre', Lha: 'litres / hectare', mph: 'miles / hour', kmh: 'km / hour', pac: 'per acre', pha: 'per hectare',
+  ach: 'acres / hour', hah: 'hectares / hour', dac: 'per acre', dha: 'per hectare', psi: 'psi', kPa: 'kilopascals', F: 'Fahrenheit', C: 'Celsius',
+};
+
 export const CONST = { LB_PER_KG, LB_PER_T, AC_PER_HA, GAL_PER_L, FT_PER_M, FT3_PER_BU, BU_PER_FT3: 1 / FT3_PER_BU };

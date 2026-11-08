@@ -62,6 +62,7 @@ export const ICONS = {
   marker: '<path d="M9 14l-4 4v2h4l4-4"/><path d="M9 14l6-10 5 5-10 6z"/><path d="M4 22h16" opacity=".5"/>',
   line: '<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="5" r="1.5"/>',
   text: '<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>',
+  hash: '<path d="M9 4L7 20M17 4l-2 16M4 9h16M3 15h16"/>',
   sigma: '<path d="M17 5H7l6 7-6 7h10"/>',
   foldTools: '<path d="M14 6l-6 6 6 6"/><path d="M19 6l-6 6 6 6" opacity=".5"/>',
   expandTools: '<path d="M10 6l6 6-6 6"/><path d="M5 6l6 6-6 6" opacity=".5"/>',
@@ -136,7 +137,7 @@ export function openSheet(build) {
     setTimeout(() => { backdrop.remove(); sheet.remove(); }, 220);
   };
   backdrop.addEventListener('click', close);
-  sheet.append(...[].concat(build(close)));
+  sheet.append(...[].concat(build(close)).filter(Boolean));   // skip empty (null) items
   root.append(backdrop, sheet);
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('sheet-open')));
   return close;

@@ -11,8 +11,8 @@ export default [
     fields: [
       crop,
       { name: 'wet', label: 'Wet grain', sym: 'W', dim: 'grain', def: 1000, help: 'Wet bushels = wet weight ÷ test weight' },
-      { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 25 },
-      { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 15.5, cropDefault: 'moist' },
+      { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 18, cropDefault: 'harvest' },
+      { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 13.5, cropDefault: 'moist' },
       { name: 'loss', label: 'Handling loss', sym: 'L', unit: '%', def: 0.5, optional: true, help: 'Invisible shrink (fines, dust): 0.5–1%' },
     ],
     compute(v, ctx) {
@@ -60,7 +60,7 @@ export default [
     fields: [
       crop,
       { name: 'bu', label: 'Grain dried (wet)', sym: 'B', dim: 'grain', def: 1000 },
-      { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 25 },
+      { name: 'mi', label: 'Initial moisture', sym: 'Mi', unit: '%', def: 18, cropDefault: 'harvest' },
       { name: 'mf', label: 'Final moisture', sym: 'Mf', unit: '%', def: 15.5, cropDefault: 'moist' },
       { name: 'method', label: 'Cost method', type: 'select', def: 'fuel', options: [{ value: 'fuel', label: 'Dryer fuel use' }, { value: 'rate', label: 'Custom charge' }] },
       { name: 'use', label: 'Fuel per bu per point', sym: 'F', unit: 'gal', def: 0.02, show: v => v.method === 'fuel', help: 'LP high-temp dryer ≈ 0.02 gal/bu/pt' },
@@ -115,11 +115,11 @@ export default [
     fields: [
       crop,
       { name: 'gross', label: 'Delivered (wet)', sym: 'G', dim: 'grain', def: 1000 },
-      { name: 'moist', label: 'Moisture', sym: 'M', unit: '%', def: 20 },
+      { name: 'moist', label: 'Moisture', sym: 'M', unit: '%', def: 18, cropDefault: 'harvest' },
       { name: 'base', label: 'Base moisture', sym: 'Mb', unit: '%', def: 15.5, cropDefault: 'moist' },
       { name: 'factor', label: 'Shrink per point', sym: 'S', unit: '%', def: 1.4, help: 'Elevator shrink factor, often 1.3–1.5%' },
       { name: 'charge', label: 'Drying charge per point', sym: 'C', money: true, unit: '/bu', def: 0.04, optional: true },
-      { name: 'price', label: 'Cash price', sym: 'P', dim: 'grainPrice', def: 4.5, optional: true },
+      { name: 'price', label: 'Cash price', sym: 'P', dim: 'grainPrice', def: 6, cropDefault: 'price', optional: true },
     ],
     compute(v, ctx) {
       const tw = ctx.tw, gBu = v.gross / tw;

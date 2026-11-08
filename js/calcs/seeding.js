@@ -94,12 +94,12 @@ export default [
     desc: 'Seed cost per acre and per field, by the unit or by the pound.',
     fields: [
       { name: 'crop', label: 'Crop', type: 'crop' },
-      { name: 'mode', label: 'Seed sold by', type: 'select', def: 'unit', options: [{ value: 'unit', label: 'Unit / bag (count)' }, { value: 'lb', label: 'Weight' }] },
-      { name: 'price', label: 'Price per unit', sym: 'P', money: true, unit: '/unit', def: 300, show: v => v.mode === 'unit' },
+      { name: 'mode', label: 'Seed sold by', type: 'select', def: 'lb', cropDefault: c => (c.unit ? 'unit' : 'lb'), options: [{ value: 'unit', label: 'Unit / bag (count)' }, { value: 'lb', label: 'Weight' }] },
+      { name: 'price', label: 'Price per unit', sym: 'P', money: true, unit: '/unit', def: 300, cropDefault: c => (c.unit ? c.seedPrice : undefined), show: v => v.mode === 'unit' },
       { name: 'unitSize', label: 'Seeds per unit', sym: 'U', unit: 'seeds', def: 80000, cropDefault: 'unit', show: v => v.mode === 'unit' },
       { name: 'rate', label: 'Seeding rate', sym: 'R', dim: 'countRate', def: 34000, cropDefault: 'target', show: v => v.mode === 'unit' },
-      { name: 'priceLb', label: 'Price per lb', sym: 'P', money: true, unit: '/lb', def: 0.6, show: v => v.mode === 'lb' },
-      { name: 'lbAc', label: 'Seeding rate', sym: 'R', dim: 'massRate', def: 90, defMetric: 100, show: v => v.mode === 'lb' },
+      { name: 'priceLb', label: 'Price per lb', sym: 'P', money: true, unit: '/lb', def: 0.3, cropDefault: c => (c.unit ? undefined : c.seedPrice), show: v => v.mode === 'lb' },
+      { name: 'lbAc', label: 'Seeding rate', sym: 'R', dim: 'massRate', def: 90, cropDefault: c => c.seedLbAc || undefined, show: v => v.mode === 'lb' },
       { name: 'acres', label: 'Acres', sym: 'A', dim: 'area', def: 160, defMetric: 65, optional: true },
     ],
     compute(v, ctx) {

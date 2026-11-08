@@ -9,8 +9,8 @@ export const fieldType = f => f.type || 'number';
 
 /** ctx used by unit conversions and compute: crop, test weight, currency, system. */
 export function makeCtx(def, state, settings) {
-  const cropId = def.crop || state.values.crop || settings.crop || 'corn';
-  const crop = CROPS[cropId] || CROPS.corn;
+  const cropId = def.crop || state.values.crop || settings.crop || 'wheat';
+  const crop = CROPS[cropId] || CROPS.wheat;
   let tw = crop.tw;
   const twField = def.fields.find(f => f.name === 'tw');
   if (twField) { const t = parseNum(state.values.tw); if (t > 0) tw = t; }
@@ -76,6 +76,12 @@ export function initState(def, settings, saved, prefill) {
   for (const f of def.fields) {
     if (fieldType(f) === 'number') continue;
     let val = f.type === 'crop' ? settings.crop : f.def;
+    // a choice can start from the crop too (e.g. seed sold by bag for corn, by weight for wheat)
+    if (f.cropDefault) {
+      const crop = CROPS[def.crop || state.values.crop || settings.crop] || CROPS.wheat;
+      const cv = typeof f.cropDefault === 'function' ? f.cropDefault(crop) : crop[f.cropDefault];
+      if (cv !== undefined) val = cv;
+    }
     if (saved?.values?.[f.name] !== undefined) val = saved.values[f.name];
     if (prefill && prefill[f.name] !== undefined) val = prefill[f.name];
     state.values[f.name] = val;
@@ -87,8 +93,11 @@ export function initState(def, settings, saved, prefill) {
     let text = '';
     if (f.def !== null && f.def !== undefined) {
       // crop constants are stored in US units, same as `def`
-      const fromCrop = f.cropDefault && ctx0.crop[f.cropDefault] !== undefined;
-      const usVal = fromCrop ? ctx0.crop[f.cropDefault] : f.def;
+      // cropDefault: a crop value name ('moist') or a rule (crop => value; undefined = use def)
+      const cropVal = !f.cropDefault ? undefined
+        : typeof f.cropDefault === 'function' ? f.cropDefault(ctx0.crop) : ctx0.crop[f.cropDefault];
+      const fromCrop = cropVal !== undefined;
+      const usVal = fromCrop ? cropVal : f.def;
       if (fromCrop && !usVal) text = '';
       else if (!f.dim) text = fmtInput(usVal);
       else if (sys === 'metric' && f.defMetric !== undefined && !fromCrop) text = fmtInput(f.defMetric);
@@ -138,8 +147,9 @@ export function applyCropDefaults(def, state, settings) {
   const ctx = makeCtx(def, state, settings);
   for (const f of def.fields) {
     if (!f.cropDefault) continue;
-    const val = ctx.crop[f.cropDefault];
+    const val = typeof f.cropDefault === 'function' ? f.cropDefault(ctx.crop) : ctx.crop[f.cropDefault];
     if (val === undefined) continue;
+    if (fieldType(f) !== 'number') { state.values[f.name] = val; continue; }
     if (!val) { state.values[f.name] = ''; continue; }
     const usUnit = f.dim ? defaultUnit(f.dim, 'us', f.units) : null;
     state.values[f.name] = fmtInput(f.dim ? roundNice(fromBase(f.dim, toBase(f.dim, val, usUnit, ctx), state.units[f.name], ctx)) : val);
