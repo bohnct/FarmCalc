@@ -88,6 +88,28 @@ class ExprParser {
   }
 }
 
+/**
+ * Read a number and its unit back out of a formatted result, e.g.
+ *   "11,360 bu" → { value: 11360, unit: 'bu' }
+ *   "$0.300/bu" → { value: 0.3, unit: '$/bu' }
+ *   "2,133 fl oz (16.67 gal)" → { value: 2133, unit: 'fl oz' }
+ * Returns null for text that isn't a single quantity (e.g. "13-52-0", "7 h 18 m").
+ */
+export function parseQty(text) {
+  if (text === null || text === undefined) return null;
+  let s = String(text).trim().replace(/\s*\(.*\)\s*$/, '').replace(/−/g, '-');
+  let cur = '';
+  const m0 = /^(-?)([^\d\s.-]{1,3})(?=[\d.])/.exec(s);   // currency prefix like "$" or "-$"
+  if (m0) { cur = m0[2]; s = m0[1] + s.slice(m0[0].length); }
+  const m = /^(-?[\d,]*\.?\d+)\s*(.*)$/.exec(s);
+  if (!m) return null;
+  const value = parseFloat(m[1].replace(/,/g, ''));
+  let unit = m[2].trim();
+  if (!Number.isFinite(value) || /\d/.test(unit) || /^-/.test(unit)) return null;
+  if (cur) unit = cur + (unit ? (unit.startsWith('/') ? unit : ' ' + unit) : '');
+  return { value, unit };
+}
+
 export function fmtDate(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' +

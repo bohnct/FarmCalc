@@ -550,6 +550,49 @@ svg { display: block; }
 .sheet-divider { color: var(--muted); font-size: 12.5px; text-align: center; margin: 10px 0 8px; display: flex; align-items: center; gap: 10px; }
 .sheet-divider::before, .sheet-divider::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
 
+/* ---- Equations (∑) ---- */
+/* while building one, every answer on the page is tappable */
+.nb.picking .ncard [data-key] {
+  outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 4px;
+  background: var(--accent-dim); cursor: pointer;
+}
+.nb.picking .ncard [data-key].picked { outline-style: solid; background: rgba(255, 122, 0, .3); }
+.eq-bar {
+  position: absolute; z-index: 22; left: 8px; right: 8px; top: calc(var(--safe-top) + 60px);
+  max-width: 460px; margin: 0 auto;
+  background: var(--float); border: 1px solid var(--accent); border-radius: 14px; padding: 10px 12px;
+  box-shadow: 0 10px 30px var(--shadow);
+}
+.eqb-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 14px; }
+.eqb-hint { color: var(--muted); font-size: 12.5px; }
+.eqb-expr { font-family: var(--hand); font-size: 22px; color: var(--ink); margin: 4px 0 8px; min-height: 28px; overflow-wrap: anywhere; }
+.eqb-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.eqb-ops { flex: 1; }
+.eqb-ops button { font-size: 18px; font-weight: 800; }
+.eq-bar .btn.small { height: 40px; padding: 0 12px; }
+.eq-bar .btn.small svg { width: 18px; height: 18px; }
+/* the equation entry: a tally with + − × ÷ down the left */
+.eq-row .eq-op { flex: none; width: 18px; color: var(--accent-2); font-weight: 700; }
+/* in an equation the numbers never shorten; long labels give way instead */
+.ncard.eqcard { width: 400px; }
+.eq-row .sum-val, .eqcard .sum-answer .ans.boxed { flex: none; max-width: none; }
+.eq-row .sum-label { flex: 1 1 auto; }
+.eqcard .sum-answer .sum-alabel { font-weight: 700; }
+.eq-warn { font-family: var(--font); font-size: 12px; color: var(--warn); line-height: 1.4; margin-top: 2px; }
+.paper-lines .eq-row { line-height: 36px; min-height: 36px; margin: 0; }
+
+/* Calculator opened from "Edit inputs" */
+.edit-banner {
+  display: flex; align-items: center; gap: 10px; margin: -6px 0 14px; padding: 10px 12px;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-dim); font-size: 14px;
+}
+.edit-banner svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.actions .btn:not(.primary) { flex: 0 0 auto; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .eq-bar { top: calc(var(--safe-top) + 8px); right: 64px; left: 12px; }
+}
+
 /* Free text written on the page (Text tool) */
 .ncard.textcard { width: max-content; max-width: 640px; min-width: 40px; }
 .ncard-text {

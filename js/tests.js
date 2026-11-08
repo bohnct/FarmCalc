@@ -3,7 +3,7 @@
 import { getCalc, CALCS } from './registry.js';
 import { initState, run, snapshot, unitChoices } from './engine.js';
 import { fromBase, convert } from './units.js';
-import { parseNum } from './format.js';
+import { parseNum, parseQty } from './format.js';
 
 const out = document.getElementById('out');
 let pass = 0, failCount = 0;
@@ -271,6 +271,28 @@ test('adding one step to the notebook', () => {
   const water = snapshot(d.def, d.state, US, d.r, {}, [1]);   // "W × (Mi − Mf) ÷ (100 − Mf)"
   const syms = water.given.map(g => g.sym).filter(Boolean).sort().join(',');
   eq('only inputs the step uses', syms, 'Mf,Mi,W');
+});
+test('reading numbers back out of entries (for equations)', () => {
+  const q = t => JSON.stringify(parseQty(t));
+  eq('bushels', q('11,360 bu'), JSON.stringify({ value: 11360, unit: 'bu' }));
+  eq('rate', q('56.01 bu/ac'), JSON.stringify({ value: 56.01, unit: 'bu/ac' }));
+  eq('money per bu', q('$0.300/bu'), JSON.stringify({ value: 0.3, unit: '$/bu' }));
+  eq('negative money', q('−$12.50'), JSON.stringify({ value: -12.5, unit: '$' }));
+  eq('extra note dropped', q('2,133 fl oz (16.67 gal)'), JSON.stringify({ value: 2133, unit: 'fl oz' }));
+  eq('percent', q('11.74 %'), JSON.stringify({ value: 11.74, unit: '%' }));
+  eq('analysis is not a quantity', parseQty('11-52-0'), null);
+  eq('h m is not a quantity', parseQty('7 h 18 m'), null);
+});
+test('edit inputs keeps how the entry was made', () => {
+  const b = calc('bin-capacity', { dia: 30, h: 6, top: 'level', bottom: 'flat', pack: '', ringH: '44' }, US, { h: 'ring' });
+  const s1 = snapshot(b.def, b.state, US, b.r, {}, 'summary');
+  eq('summary remembered', s1.pick, 'summary');
+  eq('depth unit saved', s1.prefill.hUnit, 'ring');
+  const st = initState(b.def, US, null, s1.prefill);
+  eq('reopens in rings', st.units.h, 'ring');
+  eq('reopens with 6 rings', st.values.h, '6');
+  const s2 = snapshot(b.def, b.state, US, b.r, {}, [2]);
+  eq('step pick remembered', JSON.stringify(s2.pick), '[2]');
 });
 test('summary card snapshot', () => {
   const c = calc('canola-yield', { plants: 6, pods: 60, spp: 18, tsw: 4.5, loss: '' });

@@ -93,6 +93,7 @@ export function snapToRule(y) {
 export function estimateCardH(c) {
   const wrap = t => Math.max(1, Math.ceil(String(t || '').length / 26));   // ~26 handwritten chars per line
   if (c.kind === 'text') return String(c.text || '').split('\n').reduce((n, l) => n + wrap(l), 0) * RULE + 8;
+  if (c.kind === 'eq') return ((c.terms?.length || 0) + 3) * RULE + 12;
   // summary: title, one row per input, the answer, supporting results, "show working"
   if (c.style === 'summary') return (3 + (c.given?.length || 0) + (c.results || []).filter(r => r.sum).length) * RULE + 12;
   let rows = 1 + (c.given?.length ? c.given.length + 1 : 0);

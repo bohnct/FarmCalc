@@ -1,6 +1,6 @@
 import { h, icon, toast, openSheet, promptSheet, choiceControl } from '../ui.js';
 import { getCalc } from '../registry.js';
-import { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage } from '../store.js';
+import { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage, saveNotebook } from '../store.js';
 import {
   fieldType, initState, run, selectOptions, isShown, unitChoices, fieldUnitLabel,
   applyCropDefaults, fixSelects, formatResult, snapshot,
@@ -38,7 +38,13 @@ export function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
-  const addBtn = h('button.btn.primary', { on: { click: () => addToNotebook() } }, icon('bookAdd'), 'Add to Notebook');
+  // Opened from a notebook entry's "Edit inputs" (?edit=<pageId>~<cardId>):
+  // the main button rewrites that entry instead of adding a new one.
+  const [editPageId, editCardId] = (query.get('edit') || '').split('~');
+  const editing = !!editCardId;
+  const addBtn = h('button.btn.primary', { on: { click: () => (editing ? updateEntry() : addToNotebook()) } },
+    icon(editing ? 'check' : 'bookAdd'), editing ? 'Update notebook entry' : 'Add to Notebook');
+  const addNewBtn = editing ? h('button.btn', { on: { click: () => addToNotebook() } }, icon('bookAdd'), 'Add as new') : null;
 
   const save = () => prefs.set(saveKey, { values: state.values, units: state.units, system: settings.system });
 
@@ -108,12 +114,14 @@ export function renderCalc(view, id, query) {
     workEl.replaceChildren();
     linksEl.replaceChildren();
     addBtn.disabled = true;
+    if (addNewBtn) addNewBtn.disabled = true;
     if (!r.out) {
       resultsEl.append(h('div.placeholder', r.bad.length ? 'Check the highlighted value.' : 'Enter the values above to calculate.'));
       return;
     }
     if (r.out.error) { resultsEl.append(h('div.placeholder', r.out.error)); return; }
     addBtn.disabled = false;
+    if (addNewBtn) addNewBtn.disabled = false;
     const res = r.out.results;
     const primary = res.find(x => x.primary) || res[0];
     const unitButton = (x, fr, cls) => {
@@ -217,6 +225,30 @@ export function renderCalc(view, id, query) {
     }
   }
 
+  // Rewrite the notebook entry this page was opened from, keeping its place on the page,
+  // its note and any marks drawn on it. Equations that use it recalculate on their own.
+  async function updateEntry() {
+    if (!last?.out || last.out.error) return;
+    await notebook.ready;
+    const page = notebook.pages.find(p => p.id === editPageId);
+    const card = page && page.cards.find(c => c.id === editCardId);
+    if (!card) { toast('That notebook entry was deleted. Add it as new instead.'); return; }
+    // rebuild it the way it was made: summary, whole working, or the same steps (matched by name)
+    let pick = card.pick !== undefined ? card.pick : (card.style === 'summary' ? 'summary' : null);
+    if (pick !== 'summary' && card.subtitle) {
+      const names = (card.steps || []).map(s => s.label);
+      const idx = last.out.work.map((s, i) => (names.includes(s.label) ? i : -1)).filter(i => i >= 0);
+      pick = idx.length ? idx : null;
+    }
+    const snap = snapshot(def, state, settings, last, resUnits, pick);
+    const keep = { id: card.id, x: card.x, y: card.y, date: card.date, collapsed: card.collapsed, note: card.note, showWork: card.showWork, auto: false };
+    for (const k of Object.keys(card)) delete card[k];
+    Object.assign(card, snap, keep, { edited: Date.now() });
+    saveNotebook(true);
+    location.hash = `#/notebook?page=${page.id}&card=${card.id}`;
+    toast('Notebook entry updated');
+  }
+
   function reset() {
     const fresh = initState(def, settings, null, null);
     Object.assign(state.values, fresh.values); Object.assign(state.units, fresh.units);
@@ -226,18 +258,19 @@ export function renderCalc(view, id, query) {
     toast('Reset to defaults');
   }
 
-  view.append(
+  view.append(...[
     h('header.topbar',
-      h('a.icon-btn.plain', { href: '#/', 'aria-label': 'Back' }, icon('back')),
+      h('a.icon-btn.plain', { href: editing ? '#/notebook' : '#/', 'aria-label': 'Back' }, icon('back')),
       h('h1', def.title),
       h('button.icon-btn.plain', { 'aria-label': 'Reset to defaults', title: 'Reset', on: { click: reset } }, icon('reset'))),
     h('p.calc-desc', def.desc),
+    editing ? h('div.edit-banner', icon('edit'), h('span', 'Editing a notebook entry. Change any value, then tap ', h('b', 'Update'), '.')) : null,
     fieldsEl,
     resultsEl,
-    h('div.actions', addBtn),
+    h('div.actions', addBtn, addNewBtn),
     workEl,
     linksEl,
-  );
+  ].filter(Boolean));
   drawFields();
   update();
   if (prefill) save();

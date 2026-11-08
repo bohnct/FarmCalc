@@ -70,6 +70,7 @@ const ICONS = {
   marker: '<path d="M9 14l-4 4v2h4l4-4"/><path d="M9 14l6-10 5 5-10 6z"/><path d="M4 22h16" opacity=".5"/>',
   line: '<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="5" r="1.5"/>',
   text: '<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>',
+  sigma: '<path d="M17 5H7l6 7-6 7h10"/>',
   foldTools: '<path d="M14 6l-6 6 6 6"/><path d="M19 6l-6 6 6 6" opacity=".5"/>',
   expandTools: '<path d="M10 6l6 6-6 6"/><path d="M5 6l6 6-6 6" opacity=".5"/>',
   eraser: '<path d="M8 20h12"/><path d="M4.5 15.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L12 18H7z"/><path d="M9 11l5 5"/>',
@@ -283,12 +284,34 @@ class ExprParser {
   }
 }
 
+/**
+ * Read a number and its unit back out of a formatted result, e.g.
+ *   "11,360 bu" → { value: 11360, unit: 'bu' }
+ *   "$0.300/bu" → { value: 0.3, unit: '$/bu' }
+ *   "2,133 fl oz (16.67 gal)" → { value: 2133, unit: 'fl oz' }
+ * Returns null for text that isn't a single quantity (e.g. "13-52-0", "7 h 18 m").
+ */
+function parseQty(text) {
+  if (text === null || text === undefined) return null;
+  let s = String(text).trim().replace(/\s*\(.*\)\s*$/, '').replace(/−/g, '-');
+  let cur = '';
+  const m0 = /^(-?)([^\d\s.-]{1,3})(?=[\d.])/.exec(s);   // currency prefix like "$" or "-$"
+  if (m0) { cur = m0[2]; s = m0[1] + s.slice(m0[0].length); }
+  const m = /^(-?[\d,]*\.?\d+)\s*(.*)$/.exec(s);
+  if (!m) return null;
+  const value = parseFloat(m[1].replace(/,/g, ''));
+  let unit = m[2].trim();
+  if (!Number.isFinite(value) || /\d/.test(unit) || /^-/.test(unit)) return null;
+  if (cur) unit = cur + (unit ? (unit.startsWith('/') ? unit : ' ' + unit) : '');
+  return { value, unit };
+}
+
 function fmtDate(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' +
     d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
-Object.assign(__exp, { setDecimals, fmt, fmtFixed, money, fmtInput, parseNum, fmtDate });
+Object.assign(__exp, { setDecimals, fmt, fmtFixed, money, fmtInput, parseNum, parseQty, fmtDate });
 return __exp;
 })();
 
@@ -1840,6 +1863,7 @@ function snapToRule(y) {
 function estimateCardH(c) {
   const wrap = t => Math.max(1, Math.ceil(String(t || '').length / 26));   // ~26 handwritten chars per line
   if (c.kind === 'text') return String(c.text || '').split('\n').reduce((n, l) => n + wrap(l), 0) * RULE + 8;
+  if (c.kind === 'eq') return ((c.terms?.length || 0) + 3) * RULE + 12;
   // summary: title, one row per input, the answer, supporting results, "show working"
   if (c.style === 'summary') return (3 + (c.given?.length || 0) + (c.results || []).filter(r => r.sum).length) * RULE + 12;
   let rows = 1 + (c.given?.length ? c.given.length + 1 : 0);
@@ -2148,7 +2172,9 @@ function initState(def, settings, saved, prefill) {
     for (const f of def.fields) {
       if (fieldType(f) !== 'number' || prefill[f.name] === undefined || prefill[f.name] === null) continue;
       const base = prefill[f.name];
-      if (prefill[f.name + 'Unit'] && f.choices) state.units[f.name] = prefill[f.name + 'Unit'];
+      // restore the unit it was entered in (e.g. rings) when it's still a valid choice
+      const pu = prefill[f.name + 'Unit'];
+      if (pu && ((f.choices && f.choices.some(c => c.value === pu)) || (f.dim && DIMS[f.dim].units[pu]))) state.units[f.name] = pu;
       state.values[f.name] = typeof base === 'number' ? fmtInput(f.dim ? fromBase(f.dim, base, state.units[f.name], ctx) : base) : String(base);
     }
   }
@@ -2280,7 +2306,7 @@ function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
     if (fieldType(f) !== 'number') prefill[f.name] = state.values[f.name];
     else if (v[f.name] !== null && v[f.name] !== undefined) {
       prefill[f.name] = v[f.name];
-      if (f.choices) prefill[f.name + 'Unit'] = state.units[f.name];
+      if (f.choices || f.dim) prefill[f.name + 'Unit'] = state.units[f.name];
     }
   }
   // Summary cards show the main answer plus a couple of key supporting results:
@@ -2292,6 +2318,8 @@ function snapshot(def, state, settings, result, resUnits = {}, pick = null) {
   return {
     calcId: def.id, title: def.title, category: def.category, date: Date.now(),
     style: summary ? 'summary' : 'steps',
+    // how this entry was made, so "Edit inputs" can rebuild it the same way
+    pick: summary ? 'summary' : (all ? null : pick),
     subtitle: all ? '' : steps.map(s => s.label).join(' · '),
     given, steps: [...steps.slice(0, -1).map(s => ({ ...s, final: false })), lastStep], results, notes: all ? out.notes || [] : [], prefill,
   };
@@ -2323,10 +2351,10 @@ function renderSummary(c, opts = {}) {
     h('span.sum-label', g.label), h('span.sum-dots'), h('span.sum-val', g.text)))));
   const main = (c.results || []).find(r => r.primary) || (c.results || [])[0];
   if (main) {
-    wrap.append(h('div.sum-answer', h('span.sum-alabel', main.label), h('span.sum-dots'), h('span.ans.boxed', main.text)));
+    wrap.append(h('div.sum-answer', h('span.sum-alabel', main.label), h('span.sum-dots'), h('span.ans.boxed', { 'data-key': 'r:' + main.label }, main.text)));
   }
   for (const r of (c.results || []).filter(x => x.sum)) {
-    wrap.append(h('div.sum-row.sum-extra', h('span.sum-label', r.label), h('span.sum-dots'), h('span.sum-val', r.text)));
+    wrap.append(h('div.sum-row.sum-extra', h('span.sum-label', r.label), h('span.sum-dots'), h('span.sum-val', { 'data-key': 'r:' + r.label }, r.text)));
   }
   if (opts.onToggleWork && (c.steps || []).length) {
     wrap.append(h('button.work-toggle', { type: 'button', on: { click: opts.onToggleWork } }, opts.showWork ? 'hide working ▴' : 'show working ▾'));
@@ -2349,19 +2377,20 @@ function renderSteps({ given = [], steps = [], title, subtitle }, opts = {}) {
         g.sym ? `${g.sym} = ${g.text}` : `${g.label}: ${g.text}`,
         g.sym ? h('span.g-label', g.label.toLowerCase()) : null))));
   }
-  for (const s of steps) {
+  // each step's answer carries data-key="s:<index>" so the notebook can pick it for an equation
+  steps.forEach((s, i) => {
     const el = h('div.step' + (s.final ? '.final' : ''));
     el.append(h('div.s-label', s.label));
     let first = true;
     const line = (txt, isAns) => {
-      el.append(h('div.s-line' + (first ? '.first' : ''), first ? '' : '= ', isAns ? h('span.ans', txt) : txt));
+      el.append(h('div.s-line' + (first ? '.first' : ''), first ? '' : '= ', isAns ? h('span.ans', { 'data-key': 's:' + i }, txt) : txt));
       first = false;
     };
     if (s.f) line(s.f);
     if (s.s && s.s !== s.f) line(s.s);
     line(s.r, true);
     wrap.append(el);
-  }
+  });
   return wrap;
 }
 Object.assign(__exp, { renderSummary, renderSteps });
@@ -2373,7 +2402,7 @@ __mods['js/pages/calc.js'] = (function () {
 const __exp = {};
 const { h, icon, toast, openSheet, promptSheet, choiceControl } = __mods['js/ui.js'];
 const { getCalc } = __mods['js/registry.js'];
-const { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage } = __mods['js/store.js'];
+const { settings, prefs, pushRecentCalc, notebook, addCardToPage, addPage, saveNotebook } = __mods['js/store.js'];
 const { fieldType, initState, run, selectOptions, isShown, unitChoices, fieldUnitLabel, applyCropDefaults, fixSelects, formatResult, snapshot } = __mods['js/engine.js'];
 const { renderSteps } = __mods['js/steps.js'];
 const { practicalUnits, unitLabel } = __mods['js/units.js'];
@@ -2408,7 +2437,13 @@ function renderCalc(view, id, query) {
   const workEl = h('details.work', { open: prefs.get('workOpen', true) });
   workEl.addEventListener('toggle', () => prefs.set('workOpen', workEl.open));
   const linksEl = h('div.links');
-  const addBtn = h('button.btn.primary', { on: { click: () => addToNotebook() } }, icon('bookAdd'), 'Add to Notebook');
+  // Opened from a notebook entry's "Edit inputs" (?edit=<pageId>~<cardId>):
+  // the main button rewrites that entry instead of adding a new one.
+  const [editPageId, editCardId] = (query.get('edit') || '').split('~');
+  const editing = !!editCardId;
+  const addBtn = h('button.btn.primary', { on: { click: () => (editing ? updateEntry() : addToNotebook()) } },
+    icon(editing ? 'check' : 'bookAdd'), editing ? 'Update notebook entry' : 'Add to Notebook');
+  const addNewBtn = editing ? h('button.btn', { on: { click: () => addToNotebook() } }, icon('bookAdd'), 'Add as new') : null;
 
   const save = () => prefs.set(saveKey, { values: state.values, units: state.units, system: settings.system });
 
@@ -2478,12 +2513,14 @@ function renderCalc(view, id, query) {
     workEl.replaceChildren();
     linksEl.replaceChildren();
     addBtn.disabled = true;
+    if (addNewBtn) addNewBtn.disabled = true;
     if (!r.out) {
       resultsEl.append(h('div.placeholder', r.bad.length ? 'Check the highlighted value.' : 'Enter the values above to calculate.'));
       return;
     }
     if (r.out.error) { resultsEl.append(h('div.placeholder', r.out.error)); return; }
     addBtn.disabled = false;
+    if (addNewBtn) addNewBtn.disabled = false;
     const res = r.out.results;
     const primary = res.find(x => x.primary) || res[0];
     const unitButton = (x, fr, cls) => {
@@ -2587,6 +2624,30 @@ function renderCalc(view, id, query) {
     }
   }
 
+  // Rewrite the notebook entry this page was opened from, keeping its place on the page,
+  // its note and any marks drawn on it. Equations that use it recalculate on their own.
+  async function updateEntry() {
+    if (!last?.out || last.out.error) return;
+    await notebook.ready;
+    const page = notebook.pages.find(p => p.id === editPageId);
+    const card = page && page.cards.find(c => c.id === editCardId);
+    if (!card) { toast('That notebook entry was deleted. Add it as new instead.'); return; }
+    // rebuild it the way it was made: summary, whole working, or the same steps (matched by name)
+    let pick = card.pick !== undefined ? card.pick : (card.style === 'summary' ? 'summary' : null);
+    if (pick !== 'summary' && card.subtitle) {
+      const names = (card.steps || []).map(s => s.label);
+      const idx = last.out.work.map((s, i) => (names.includes(s.label) ? i : -1)).filter(i => i >= 0);
+      pick = idx.length ? idx : null;
+    }
+    const snap = snapshot(def, state, settings, last, resUnits, pick);
+    const keep = { id: card.id, x: card.x, y: card.y, date: card.date, collapsed: card.collapsed, note: card.note, showWork: card.showWork, auto: false };
+    for (const k of Object.keys(card)) delete card[k];
+    Object.assign(card, snap, keep, { edited: Date.now() });
+    saveNotebook(true);
+    location.hash = `#/notebook?page=${page.id}&card=${card.id}`;
+    toast('Notebook entry updated');
+  }
+
   function reset() {
     const fresh = initState(def, settings, null, null);
     Object.assign(state.values, fresh.values); Object.assign(state.units, fresh.units);
@@ -2596,18 +2657,19 @@ function renderCalc(view, id, query) {
     toast('Reset to defaults');
   }
 
-  view.append(
+  view.append(...[
     h('header.topbar',
-      h('a.icon-btn.plain', { href: '#/', 'aria-label': 'Back' }, icon('back')),
+      h('a.icon-btn.plain', { href: editing ? '#/notebook' : '#/', 'aria-label': 'Back' }, icon('back')),
       h('h1', def.title),
       h('button.icon-btn.plain', { 'aria-label': 'Reset to defaults', title: 'Reset', on: { click: reset } }, icon('reset'))),
     h('p.calc-desc', def.desc),
+    editing ? h('div.edit-banner', icon('edit'), h('span', 'Editing a notebook entry. Change any value, then tap ', h('b', 'Update'), '.')) : null,
     fieldsEl,
     resultsEl,
-    h('div.actions', addBtn),
+    h('div.actions', addBtn, addNewBtn),
     workEl,
     linksEl,
-  );
+  ].filter(Boolean));
   drawFields();
   update();
   if (prefill) save();
@@ -2667,7 +2729,7 @@ const { h, icon, toast, openSheet, promptSheet, confirmSheet } = __mods['js/ui.j
 const { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } = __mods['js/store.js'];
 const { renderSteps, renderSummary } = __mods['js/steps.js'];
 const { getCalc } = __mods['js/registry.js'];
-const { fmtDate } = __mods['js/format.js'];
+const { fmtDate, fmt, parseQty } = __mods['js/format.js'];
 const { inkColor } = __mods['js/theme.js'];
 
 const PEN_COLORS = ['#ffffff', '#ff7a00', '#ff4d4d', '#ffd400', '#3ddc84', '#4da3ff'];
@@ -2731,6 +2793,7 @@ async function renderNotebook(view, query) {
   let popEl = null;
   const nb = h('div.nb', viewport,
     h('div.nb-top',
+      h('button.icon-btn', { 'aria-label': 'New equation: add up or combine numbers on this page', title: 'Equation (sum numbers)', on: { click: () => startEq(null) } }, icon('sigma')),
       h('button.icon-btn', { 'aria-label': 'Calculation history', title: 'History', on: { click: historySheet } }, icon('history')),
       h('button.icon-btn', { 'aria-label': 'Export page as image', title: 'Export image', on: { click: exportPng } }, icon('share'))),
     h('div.nb-zoom',
@@ -2820,6 +2883,7 @@ async function renderNotebook(view, query) {
     ctx2d.setTransform(dpr * vt.scale, 0, 0, dpr * vt.scale, dpr * vt.x, dpr * vt.y);
     for (const s of page.strokes) drawStroke(ctx2d, s);
     if (live) drawStroke(ctx2d, live);
+    drawArrows(ctx2d);
   }
 
   // ---------- cards ----------
@@ -2834,6 +2898,8 @@ async function renderNotebook(view, query) {
     cardsEl.className = 'nb-cards paper-' + (settings.paper || 'grid');
     cardsEl.replaceChildren(...page.cards.map(cardEl));
     selectCard(page.cards.some(c => c.id === selectedId) ? selectedId : null);
+    markPicked();
+    requestDraw();   // arrows follow the cards
     // remember real heights so new cards get written below existing ones, and
     // push down any app-placed card whose estimated spot overlaps the one above it
     requestAnimationFrame(() => {
@@ -2864,6 +2930,7 @@ async function renderNotebook(view, query) {
     emptyEl.style.display = page.cards.length || page.strokes.length ? 'none' : '';
   }
   function cardEl(c) {
+    if (c.kind === 'eq') return eqEl(c);
     if (c.kind === 'text') {
       // free text written anywhere on the page
       return h('div.ncard.textcard', { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
@@ -2920,6 +2987,254 @@ async function renderNotebook(view, query) {
     saveNotebook(); renderCards(); syncTools();
   }
 
+  // ---------- equations (∑) ----------
+  // An equation entry adds, subtracts, multiplies or divides numbers taken from
+  // other entries on the page (or typed in). It reads those numbers fresh every
+  // time it's drawn, so editing a bin's inputs updates the total automatically.
+  // Terms: { op: '+'|'-'|'*'|'/', ref: { card, key } } or { op, num, unit, label }.
+  // key: 'r:<result label>' | 's:<step index>' | 'eq' (another equation's answer).
+  const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+
+  function refInfo(ref, depth = 0) {
+    const c = page.cards.find(k => k.id === ref.card);
+    if (!c) return { missing: true, label: 'deleted entry', q: null };
+    if (c.kind === 'eq') {
+      const r = evalEq(c, depth + 1);
+      return { label: c.title, q: r.ok ? { value: r.value, unit: r.unit } : null };
+    }
+    if (ref.key.startsWith('r:')) {
+      const lab = ref.key.slice(2);
+      const r = (c.results || []).find(x => x.label === lab);
+      return { label: `${c.title} · ${lab}`, q: r ? parseQty(r.text) : null, missing: !r };
+    }
+    if (ref.key.startsWith('s:')) {
+      const st = (c.steps || [])[Number(ref.key.slice(2))];
+      return { label: `${c.title} · ${st ? st.label : '?'}`, q: st ? parseQty(st.r) : null, missing: !st };
+    }
+    return { label: c.title, q: null, missing: true };
+  }
+  const termInfo = (t, depth) => (t.ref ? refInfo(t.ref, depth) : { label: t.label || 'number', q: { value: t.num, unit: t.unit || '' } });
+
+  /** Work the terms left to right, like a tally on paper. Units: + and − keep the first term's unit. */
+  function evalEq(eq, depth = 0) {
+    if (depth > 8) return { ok: false };          // guards against equations that use each other in a loop
+    let value = 0, unit = '', mixed = false;
+    for (const [i, t] of eq.terms.entries()) {
+      const info = termInfo(t, depth);
+      if (!info.q) return { ok: false, missing: true };
+      const { value: v, unit: u } = info.q;
+      if (i === 0) { value = v; unit = u; continue; }
+      if (t.op === '+' || t.op === '-') {
+        if (u && unit && u !== unit) mixed = true;
+        if (!unit) unit = u;
+        value = t.op === '+' ? value + v : value - v;
+      } else if (t.op === '*') {
+        value *= v;
+        if (u) unit = unit ? `${unit}·${u}` : u;
+      } else {
+        if (v === 0) return { ok: false, div0: true };
+        value /= v;
+        if (u) unit = u === unit ? '' : (unit ? `${unit}/${u}` : `1/${u}`);
+      }
+    }
+    return { ok: Number.isFinite(value), value, unit, mixed };
+  }
+
+  /** "$" units go in front ($1,250.00/bu); everything else after (11,360 bu). */
+  function fmtQty(v, unit) {
+    const m = /^([^\w\s%°/·]{1,3})(.*)$/.exec(unit || '');
+    if (m) { const rest = m[2].trim(); return `${m[1]}${fmt(v, 2)}${rest ? (rest.startsWith('/') ? rest : ' ' + rest) : ''}`; }
+    return `${fmt(v)}${unit ? ' ' + unit : ''}`;
+  }
+
+  /**
+   * Line labels for an equation. When two lines would read the same
+   * ("Bin Volume · Capacity" twice), tell them apart by the entry's note
+   * (e.g. "Bin 3") or else its first measured input (e.g. "30 ft").
+   */
+  function termLabels(eq) {
+    const infos = eq.terms.map(t => termInfo(t));
+    const count = {};
+    infos.forEach(i => { count[i.label] = (count[i.label] || 0) + 1; });
+    return eq.terms.map((t, i) => {
+      const base = infos[i].label;
+      if (count[base] < 2 || !t.ref) return base;
+      const src = page.cards.find(k => k.id === t.ref.card);
+      if (!src) return base;
+      const tag = (src.note || '').split('\n')[0].trim()
+        || ((src.given || []).find(g => g.label !== 'Crop' && /\d/.test(g.text)) || {}).text || '';
+      return tag ? base.replace(' · ', ` (${tag}) · `) : base;
+    });
+  }
+
+  function eqEl(c) {
+    const r = evalEq(c);
+    const anyMissing = c.terms.some(t => t.ref && termInfo(t).missing);
+    const labels = termLabels(c);
+    return h('div.ncard.eqcard' + (selectedId === c.id ? '.selected' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
+      h('div.ncard-head',
+        h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
+        h('button', { 'aria-label': 'Edit equation', on: { click: () => startEq(c) } }, icon('edit')),
+        h('button', { 'aria-label': 'Equation options', on: { click: () => cardMenu(c) } }, icon('more'))),
+      h('div.ncard-body', h('div.hand-steps.summary',
+        h('div.hand-title', c.title),
+        c.terms.map((t, i) => {
+          const info = termInfo(t);
+          return h('div.sum-row.eq-row', { 'data-term': String(i) },
+            h('span.eq-op', i ? OPS[t.op] : ''),
+            h('span.sum-label', labels[i]), h('span.sum-dots'),
+            h('span.sum-val', info.q ? fmtQty(info.q.value, info.q.unit) : '?'));
+        }),
+        h('div.sum-answer', h('span.sum-alabel', '='), h('span.sum-dots'),
+          h('span.ans.boxed', { 'data-key': 'eq' }, r.ok ? fmtQty(r.value, r.unit) : (r.div0 ? 'can’t ÷ 0' : '?'))),
+        r.mixed ? h('div.eq-warn', 'units differ, check the terms') : null,
+        anyMissing ? h('div.eq-warn', 'an entry used here was deleted') : null)));
+  }
+
+  // ---- pick mode: tap numbers on the page to build an equation ----
+  let picking = null;    // { terms, op, editId }
+  const eqBar = h('div.eq-bar');
+  function startEq(existing) {
+    if (picking) endEq();
+    picking = { terms: existing ? structuredClone(existing.terms) : [], op: '+', editId: existing ? existing.id : null };
+    if (tool !== 'select') setTool('select');
+    closePop(); selectCard(null);
+    nb.classList.add('picking');
+    nb.append(eqBar);
+    drawEqBar();
+  }
+  function endEq() {
+    picking = null;
+    nb.classList.remove('picking');
+    eqBar.remove();
+    cardsEl.querySelectorAll('.picked').forEach(el => el.classList.remove('picked'));
+    requestDraw();
+  }
+  function markPicked() {
+    cardsEl.querySelectorAll('.picked').forEach(el => el.classList.remove('picked'));
+    if (!picking) return;
+    for (const t of picking.terms) {
+      if (!t.ref) continue;
+      cardsEl.querySelector(`.ncard[data-id="${t.ref.card}"] [data-key="${CSS.escape(t.ref.key)}"]`)?.classList.add('picked');
+    }
+  }
+  function drawEqBar() {
+    if (!picking) return;
+    const T = picking.terms;
+    const r = T.length ? evalEq({ terms: T }) : null;
+    const expr = T.map((t, i) => { const q = termInfo(t).q; return (i ? ` ${OPS[t.op]} ` : '') + (q ? fmtQty(q.value, q.unit) : '?'); }).join('')
+      + (r && r.ok && T.length > 1 ? `  =  ${fmtQty(r.value, r.unit)}` : '');
+    eqBar.replaceChildren(
+      h('div.eqb-head', h('b', picking.editId ? 'Edit equation' : 'New equation'),
+        h('span.eqb-hint', T.length ? `${T.length} number${T.length === 1 ? '' : 's'}` : 'tap numbers on the page')),
+      h('div.eqb-expr', expr || 'Tap an answer on the page to start…'),
+      h('div.eqb-row',
+        h('div.seg.eqb-ops', { role: 'radiogroup', 'aria-label': 'Next operation' },
+          Object.keys(OPS).map(o => h('button' + (picking.op === o ? '.on' : ''), {
+            type: 'button', role: 'radio', 'aria-checked': String(picking.op === o), 'aria-label': { '+': 'plus', '-': 'minus', '*': 'times', '/': 'divided by' }[o],
+            on: { click: () => { picking.op = o; drawEqBar(); } },
+          }, OPS[o]))),
+        h('button.btn.small', { type: 'button', title: 'Type a number', on: { click: addTypedNumber } }, '123'),
+        h('button.btn.small', { type: 'button', 'aria-label': 'Remove last number', disabled: !T.length, on: { click: () => { T.pop(); drawEqBar(); } } }, icon('undo'))),
+      h('div.eqb-row',
+        h('button.btn.small', { type: 'button', style: { flex: 1 }, on: { click: endEq } }, 'Cancel'),
+        h('button.btn.small.primary', { type: 'button', style: { flex: 1 }, disabled: !T.length, on: { click: finishEq } }, 'Done')));
+    markPicked();
+  }
+  function addRef(el) {
+    const cardId = el.closest('.ncard')?.dataset.id;
+    if (!cardId || cardId === picking.editId) return;   // an equation can't use itself
+    picking.terms.push({ op: picking.terms.length ? picking.op : '+', ref: { card: cardId, key: el.dataset.key } });
+    drawEqBar();
+  }
+  async function addTypedNumber() {
+    const text = await promptSheet('Add a number', '', 'Add', { placeholder: 'e.g. 5000 bu sold' });
+    if (!text || !picking) return;
+    const m = /^\s*(-?[\d,]*\.?\d+)\s*(.*)$/.exec(text.replace(/−/g, '-'));
+    if (!m) { toast('Start with a number, e.g. 5000 sold'); return; }
+    let rest = m[2].trim(), unit = '';
+    // "5000 bu sold": if the first word matches the running unit, treat it as the unit
+    const running = picking.terms.length ? evalEq({ terms: picking.terms }).unit : '';
+    if (running && rest.split(/\s+/)[0] === running) { unit = running; rest = rest.slice(running.length).trim(); }
+    picking.terms.push({ op: picking.terms.length ? picking.op : '+', num: parseFloat(m[1].replace(/,/g, '')), unit, label: rest || 'number' });
+    drawEqBar();
+  }
+  async function finishEq() {
+    const P = picking;
+    if (!P || !P.terms.length) return;
+    if (P.editId) {
+      const eq = page.cards.find(k => k.id === P.editId);
+      if (eq) { undo.push({ t: 'eqedit', card: eq, from: eq.terms, to: P.terms }); redo = []; eq.terms = P.terms; }
+      endEq(); saveNotebook(); renderCards(); syncTools();
+      return;
+    }
+    const allPlus = P.terms.every((t, i) => !i || t.op === '+');
+    endEq();
+    const title = (await promptSheet('Name this equation', allPlus ? 'Total' : 'Result', 'Save')) || (allPlus ? 'Total' : 'Result');
+    // place it beside the first entry it uses (or below the entries if there's no room)
+    const src = P.terms.map(t => t.ref && page.cards.find(k => k.id === t.ref.card)).filter(Boolean);
+    let x = MARGIN_X + 14, y = HEAD_H + 8;
+    if (src.length) {
+      const first = src[0];
+      const w = cardsEl.querySelector(`.ncard[data-id="${first.id}"]`)?.offsetWidth || 340;
+      x = first.x + w + 40; y = first.y;
+      if (x > PAGE_W - 360) {
+        x = first.x;
+        y = Math.max(...src.map(c => c.y + (cardsEl.querySelector(`.ncard[data-id="${c.id}"]`)?.offsetHeight || 200))) + 36;
+      }
+    }
+    const eq = { id: uid(), kind: 'eq', title, terms: P.terms, date: Date.now(), x: Math.round(clamp(x, 4, PAGE_W - 340)), y: snapToRule(y) };
+    page.cards.push(eq);
+    undo.push({ t: 'addcard', card: eq }); redo = [];
+    saveNotebook(); renderCards(); syncTools();
+    requestAnimationFrame(() => centerOn(eq));
+  }
+
+  // ---- arrows from each number an equation uses to its line in the equation ----
+  function worldRect(el) {
+    const r = el.getBoundingClientRect(), v = viewport.getBoundingClientRect();
+    return { x: (r.left - v.left - vt.x) / vt.scale, y: (r.top - v.top - vt.y) / vt.scale, w: r.width / vt.scale, h: r.height / vt.scale };
+  }
+  function drawArrows(g) {
+    for (const c of page.cards) {
+      if (c.kind !== 'eq') continue;
+      c.terms.forEach((t, i) => {
+        if (!t.ref) return;
+        const cardNode = cardsEl.querySelector(`.ncard[data-id="${t.ref.card}"]`);
+        const rowEl = cardsEl.querySelector(`.ncard[data-id="${c.id}"] [data-term="${i}"]`);
+        if (!cardNode || !rowEl) return;
+        const keyEl = cardNode.querySelector(`[data-key="${CSS.escape(t.ref.key)}"]`);
+        const a = worldRect(keyEl && keyEl.offsetParent ? keyEl : cardNode);   // folded-away number → point at its entry
+        const b = worldRect(rowEl);
+        g.save();
+        g.strokeStyle = g.fillStyle = '#ff7a00';
+        g.globalAlpha = 0.9; g.lineWidth = 2; g.setLineDash([7, 5]); g.lineCap = 'round';
+        let sx, sy = a.y + a.h / 2, ex, ey = b.y + b.h / 2, c1x, c2x;
+        const overlap = !(a.x + a.w < b.x || b.x + b.w < a.x);
+        if (overlap) {                       // stacked in the same column: loop out to the left
+          sx = a.x - 6; ex = b.x - 4;
+          c1x = Math.min(sx, ex) - 60; c2x = c1x;
+        } else if (b.x > a.x) {              // equation to the right
+          sx = a.x + a.w + 6; ex = b.x - 4;
+          const d = Math.max(30, (ex - sx) / 2); c1x = sx + d; c2x = ex - d;
+        } else {                             // equation to the left
+          sx = a.x - 6; ex = b.x + b.w + 4;
+          const d = Math.max(30, (sx - ex) / 2); c1x = sx - d; c2x = ex + d;
+        }
+        g.beginPath(); g.moveTo(sx, sy); g.bezierCurveTo(c1x, sy, c2x, ey, ex, ey); g.stroke();
+        // arrowhead along the curve's final direction
+        g.setLineDash([]);
+        const ang = Math.atan2(ey - ey, ex - c2x) || (ex >= c2x ? 0 : Math.PI);
+        const L = 11;
+        g.beginPath(); g.moveTo(ex, ey);
+        g.lineTo(ex - L * Math.cos(ang - 0.45), ey - L * Math.sin(ang - 0.45));
+        g.lineTo(ex - L * Math.cos(ang + 0.45), ey - L * Math.sin(ang + 0.45));
+        g.closePath(); g.fill();
+        g.restore();
+      });
+    }
+  }
+
   /** Size (Small/Medium/Large) and color for one text note; changes apply right away and can be undone. */
   function textStyleControls(c) {
     const wrap = h('div.text-style');
@@ -2941,6 +3256,18 @@ async function renderNotebook(view, query) {
   }
 
   function cardMenu(c) {
+    if (c.kind === 'eq') {
+      openSheet(close => [
+        h('h3', c.title),
+        h('button.list-item', { on: { click: () => { close(); startEq(c); } } }, icon('edit'), h('div.li-main', h('div.li-title', 'Edit equation'), h('div.li-sub', 'Add or remove numbers, change + − × ÷'))),
+        h('button.list-item', {
+          on: { click: async () => { close(); const t = await promptSheet('Rename equation', c.title, 'Save'); if (t) { c.title = t; saveNotebook(); renderCards(); } } },
+        }, icon('note'), h('div.li-main', h('div.li-title', 'Rename'))),
+        h('button.list-item', { on: { click: () => { close(); duplicateCard(c); } } }, icon('dup'), h('div.li-main', h('div.li-title', 'Duplicate'))),
+        h('button.list-item', { on: { click: () => { close(); removeCard(c, 'Equation deleted'); } } }, icon('trash'), h('div.li-main', h('div.li-title', { style: { color: 'var(--danger)' } }, 'Delete equation'))),
+      ]);
+      return;
+    }
     if (c.kind === 'text') {
       openSheet(close => [
         h('h3', 'Text'),
@@ -2953,8 +3280,11 @@ async function renderNotebook(view, query) {
     }
     openSheet(close => [
       h('h3', c.title),
+      // Edit inputs: opens the calculator with this entry's values; "Update" there rewrites this entry in place
+      h('button.list-item', { on: { click: () => { close(); location.hash = `#/calc/${c.calcId}?p=${encodeURIComponent(JSON.stringify(c.prefill || {}))}&edit=${page.id}~${c.id}`; } } },
+        icon('edit'), h('div.li-main', h('div.li-title', 'Edit inputs'), h('div.li-sub', 'Change a value (e.g. a measured diameter) and update this entry'))),
       h('button.list-item', { on: { click: () => { close(); location.hash = `#/calc/${c.calcId}?p=${encodeURIComponent(JSON.stringify(c.prefill || {}))}`; } } },
-        icon('calc'), h('div.li-main', h('div.li-title', 'Reopen in calculator'), h('div.li-sub', 'Loads these exact inputs'))),
+        icon('calc'), h('div.li-main', h('div.li-title', 'Open as a new calculation'), h('div.li-sub', 'Starts from these inputs; this entry stays as is'))),
       h('button.list-item', {
         on: {
           click: async () => {
@@ -2997,6 +3327,11 @@ async function renderNotebook(view, query) {
   let start = null;
 
   function onDown(e) {
+    // building an equation: a tap on any answer adds it
+    if (picking) {
+      const k = e.target.closest('[data-key]');
+      if (k && k.closest('.ncard')) { e.preventDefault(); addRef(k); return; }
+    }
     if (e.target.closest('button, a, input, select')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -3248,6 +3583,8 @@ async function renderNotebook(view, query) {
       else { page.cards.splice(page.cards.indexOf(a.card), 1); page.strokes = page.strokes.filter(s => s.card !== a.card.id); }
     } else if (a.t === 'addcard') {
       if (reverse) page.cards.splice(page.cards.indexOf(a.card), 1); else page.cards.push(a.card);
+    } else if (a.t === 'eqedit') {
+      a.card.terms = reverse ? a.from : a.to;
     } else if (a.t === 'edit') {
       a.card.text = reverse ? a.from : a.to;
     } else if (a.t === 'style') {
@@ -3401,6 +3738,7 @@ async function renderNotebook(view, query) {
       drawCardToCanvas(g, el, c, vt.scale);
     }
     for (const s of page.strokes) drawStroke(g, s);
+    drawArrows(g);
     const blob = await new Promise(res => out.toBlob(res, 'image/png'));
     const name = `${page.name.replace(/[^\w-]+/g, '_')}.png`;
     const file = new File([blob], name, { type: 'image/png' });

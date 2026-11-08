@@ -18,10 +18,10 @@ export function renderSummary(c, opts = {}) {
     h('span.sum-label', g.label), h('span.sum-dots'), h('span.sum-val', g.text)))));
   const main = (c.results || []).find(r => r.primary) || (c.results || [])[0];
   if (main) {
-    wrap.append(h('div.sum-answer', h('span.sum-alabel', main.label), h('span.sum-dots'), h('span.ans.boxed', main.text)));
+    wrap.append(h('div.sum-answer', h('span.sum-alabel', main.label), h('span.sum-dots'), h('span.ans.boxed', { 'data-key': 'r:' + main.label }, main.text)));
   }
   for (const r of (c.results || []).filter(x => x.sum)) {
-    wrap.append(h('div.sum-row.sum-extra', h('span.sum-label', r.label), h('span.sum-dots'), h('span.sum-val', r.text)));
+    wrap.append(h('div.sum-row.sum-extra', h('span.sum-label', r.label), h('span.sum-dots'), h('span.sum-val', { 'data-key': 'r:' + r.label }, r.text)));
   }
   if (opts.onToggleWork && (c.steps || []).length) {
     wrap.append(h('button.work-toggle', { type: 'button', on: { click: opts.onToggleWork } }, opts.showWork ? 'hide working ▴' : 'show working ▾'));
@@ -44,18 +44,19 @@ export function renderSteps({ given = [], steps = [], title, subtitle }, opts = 
         g.sym ? `${g.sym} = ${g.text}` : `${g.label}: ${g.text}`,
         g.sym ? h('span.g-label', g.label.toLowerCase()) : null))));
   }
-  for (const s of steps) {
+  // each step's answer carries data-key="s:<index>" so the notebook can pick it for an equation
+  steps.forEach((s, i) => {
     const el = h('div.step' + (s.final ? '.final' : ''));
     el.append(h('div.s-label', s.label));
     let first = true;
     const line = (txt, isAns) => {
-      el.append(h('div.s-line' + (first ? '.first' : ''), first ? '' : '= ', isAns ? h('span.ans', txt) : txt));
+      el.append(h('div.s-line' + (first ? '.first' : ''), first ? '' : '= ', isAns ? h('span.ans', { 'data-key': 's:' + i }, txt) : txt));
       first = false;
     };
     if (s.f) line(s.f);
     if (s.s && s.s !== s.f) line(s.s);
     line(s.r, true);
     wrap.append(el);
-  }
+  });
   return wrap;
 }

@@ -1,6 +1,6 @@
 // Service worker: caches the app so it works with no signal in the field.
 // Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = 'farmcalc-v11';
+const VERSION = 'farmcalc-v13';
 const FONT_CACHE = 'farmcalc-fonts';
 
 const APP_FILES = [

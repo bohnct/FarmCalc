@@ -4,7 +4,7 @@ import { h, icon, toast, openSheet, promptSheet, confirmSheet } from '../ui.js';
 import { notebook, getPage, addPage, deletePage, saveNotebook, addCardToPage, settings, prefs, uid, PAGE_W, PAGE_H, HEAD_H, MARGIN_X, snapToRule } from '../store.js';
 import { renderSteps, renderSummary } from '../steps.js';
 import { getCalc } from '../registry.js';
-import { fmtDate } from '../format.js';
+import { fmtDate, fmt, parseQty } from '../format.js';
 import { inkColor } from '../theme.js';
 
 const PEN_COLORS = ['#ffffff', '#ff7a00', '#ff4d4d', '#ffd400', '#3ddc84', '#4da3ff'];
@@ -68,6 +68,7 @@ export async function renderNotebook(view, query) {
   let popEl = null;
   const nb = h('div.nb', viewport,
     h('div.nb-top',
+      h('button.icon-btn', { 'aria-label': 'New equation: add up or combine numbers on this page', title: 'Equation (sum numbers)', on: { click: () => startEq(null) } }, icon('sigma')),
       h('button.icon-btn', { 'aria-label': 'Calculation history', title: 'History', on: { click: historySheet } }, icon('history')),
       h('button.icon-btn', { 'aria-label': 'Export page as image', title: 'Export image', on: { click: exportPng } }, icon('share'))),
     h('div.nb-zoom',
@@ -157,6 +158,7 @@ export async function renderNotebook(view, query) {
     ctx2d.setTransform(dpr * vt.scale, 0, 0, dpr * vt.scale, dpr * vt.x, dpr * vt.y);
     for (const s of page.strokes) drawStroke(ctx2d, s);
     if (live) drawStroke(ctx2d, live);
+    drawArrows(ctx2d);
   }
 
   // ---------- cards ----------
@@ -171,6 +173,8 @@ export async function renderNotebook(view, query) {
     cardsEl.className = 'nb-cards paper-' + (settings.paper || 'grid');
     cardsEl.replaceChildren(...page.cards.map(cardEl));
     selectCard(page.cards.some(c => c.id === selectedId) ? selectedId : null);
+    markPicked();
+    requestDraw();   // arrows follow the cards
     // remember real heights so new cards get written below existing ones, and
     // push down any app-placed card whose estimated spot overlaps the one above it
     requestAnimationFrame(() => {
@@ -201,6 +205,7 @@ export async function renderNotebook(view, query) {
     emptyEl.style.display = page.cards.length || page.strokes.length ? 'none' : '';
   }
   function cardEl(c) {
+    if (c.kind === 'eq') return eqEl(c);
     if (c.kind === 'text') {
       // free text written anywhere on the page
       return h('div.ncard.textcard', { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
@@ -257,6 +262,254 @@ export async function renderNotebook(view, query) {
     saveNotebook(); renderCards(); syncTools();
   }
 
+  // ---------- equations (∑) ----------
+  // An equation entry adds, subtracts, multiplies or divides numbers taken from
+  // other entries on the page (or typed in). It reads those numbers fresh every
+  // time it's drawn, so editing a bin's inputs updates the total automatically.
+  // Terms: { op: '+'|'-'|'*'|'/', ref: { card, key } } or { op, num, unit, label }.
+  // key: 'r:<result label>' | 's:<step index>' | 'eq' (another equation's answer).
+  const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+
+  function refInfo(ref, depth = 0) {
+    const c = page.cards.find(k => k.id === ref.card);
+    if (!c) return { missing: true, label: 'deleted entry', q: null };
+    if (c.kind === 'eq') {
+      const r = evalEq(c, depth + 1);
+      return { label: c.title, q: r.ok ? { value: r.value, unit: r.unit } : null };
+    }
+    if (ref.key.startsWith('r:')) {
+      const lab = ref.key.slice(2);
+      const r = (c.results || []).find(x => x.label === lab);
+      return { label: `${c.title} · ${lab}`, q: r ? parseQty(r.text) : null, missing: !r };
+    }
+    if (ref.key.startsWith('s:')) {
+      const st = (c.steps || [])[Number(ref.key.slice(2))];
+      return { label: `${c.title} · ${st ? st.label : '?'}`, q: st ? parseQty(st.r) : null, missing: !st };
+    }
+    return { label: c.title, q: null, missing: true };
+  }
+  const termInfo = (t, depth) => (t.ref ? refInfo(t.ref, depth) : { label: t.label || 'number', q: { value: t.num, unit: t.unit || '' } });
+
+  /** Work the terms left to right, like a tally on paper. Units: + and − keep the first term's unit. */
+  function evalEq(eq, depth = 0) {
+    if (depth > 8) return { ok: false };          // guards against equations that use each other in a loop
+    let value = 0, unit = '', mixed = false;
+    for (const [i, t] of eq.terms.entries()) {
+      const info = termInfo(t, depth);
+      if (!info.q) return { ok: false, missing: true };
+      const { value: v, unit: u } = info.q;
+      if (i === 0) { value = v; unit = u; continue; }
+      if (t.op === '+' || t.op === '-') {
+        if (u && unit && u !== unit) mixed = true;
+        if (!unit) unit = u;
+        value = t.op === '+' ? value + v : value - v;
+      } else if (t.op === '*') {
+        value *= v;
+        if (u) unit = unit ? `${unit}·${u}` : u;
+      } else {
+        if (v === 0) return { ok: false, div0: true };
+        value /= v;
+        if (u) unit = u === unit ? '' : (unit ? `${unit}/${u}` : `1/${u}`);
+      }
+    }
+    return { ok: Number.isFinite(value), value, unit, mixed };
+  }
+
+  /** "$" units go in front ($1,250.00/bu); everything else after (11,360 bu). */
+  function fmtQty(v, unit) {
+    const m = /^([^\w\s%°/·]{1,3})(.*)$/.exec(unit || '');
+    if (m) { const rest = m[2].trim(); return `${m[1]}${fmt(v, 2)}${rest ? (rest.startsWith('/') ? rest : ' ' + rest) : ''}`; }
+    return `${fmt(v)}${unit ? ' ' + unit : ''}`;
+  }
+
+  /**
+   * Line labels for an equation. When two lines would read the same
+   * ("Bin Volume · Capacity" twice), tell them apart by the entry's note
+   * (e.g. "Bin 3") or else its first measured input (e.g. "30 ft").
+   */
+  function termLabels(eq) {
+    const infos = eq.terms.map(t => termInfo(t));
+    const count = {};
+    infos.forEach(i => { count[i.label] = (count[i.label] || 0) + 1; });
+    return eq.terms.map((t, i) => {
+      const base = infos[i].label;
+      if (count[base] < 2 || !t.ref) return base;
+      const src = page.cards.find(k => k.id === t.ref.card);
+      if (!src) return base;
+      const tag = (src.note || '').split('\n')[0].trim()
+        || ((src.given || []).find(g => g.label !== 'Crop' && /\d/.test(g.text)) || {}).text || '';
+      return tag ? base.replace(' · ', ` (${tag}) · `) : base;
+    });
+  }
+
+  function eqEl(c) {
+    const r = evalEq(c);
+    const anyMissing = c.terms.some(t => t.ref && termInfo(t).missing);
+    const labels = termLabels(c);
+    return h('div.ncard.eqcard' + (selectedId === c.id ? '.selected' : ''), { 'data-id': c.id, style: { left: c.x + 'px', top: c.y + 'px' } },
+      h('div.ncard-head',
+        h('div.nh-text', h('div.nh-date', fmtDate(c.date))),
+        h('button', { 'aria-label': 'Edit equation', on: { click: () => startEq(c) } }, icon('edit')),
+        h('button', { 'aria-label': 'Equation options', on: { click: () => cardMenu(c) } }, icon('more'))),
+      h('div.ncard-body', h('div.hand-steps.summary',
+        h('div.hand-title', c.title),
+        c.terms.map((t, i) => {
+          const info = termInfo(t);
+          return h('div.sum-row.eq-row', { 'data-term': String(i) },
+            h('span.eq-op', i ? OPS[t.op] : ''),
+            h('span.sum-label', labels[i]), h('span.sum-dots'),
+            h('span.sum-val', info.q ? fmtQty(info.q.value, info.q.unit) : '?'));
+        }),
+        h('div.sum-answer', h('span.sum-alabel', '='), h('span.sum-dots'),
+          h('span.ans.boxed', { 'data-key': 'eq' }, r.ok ? fmtQty(r.value, r.unit) : (r.div0 ? 'can’t ÷ 0' : '?'))),
+        r.mixed ? h('div.eq-warn', 'units differ, check the terms') : null,
+        anyMissing ? h('div.eq-warn', 'an entry used here was deleted') : null)));
+  }
+
+  // ---- pick mode: tap numbers on the page to build an equation ----
+  let picking = null;    // { terms, op, editId }
+  const eqBar = h('div.eq-bar');
+  function startEq(existing) {
+    if (picking) endEq();
+    picking = { terms: existing ? structuredClone(existing.terms) : [], op: '+', editId: existing ? existing.id : null };
+    if (tool !== 'select') setTool('select');
+    closePop(); selectCard(null);
+    nb.classList.add('picking');
+    nb.append(eqBar);
+    drawEqBar();
+  }
+  function endEq() {
+    picking = null;
+    nb.classList.remove('picking');
+    eqBar.remove();
+    cardsEl.querySelectorAll('.picked').forEach(el => el.classList.remove('picked'));
+    requestDraw();
+  }
+  function markPicked() {
+    cardsEl.querySelectorAll('.picked').forEach(el => el.classList.remove('picked'));
+    if (!picking) return;
+    for (const t of picking.terms) {
+      if (!t.ref) continue;
+      cardsEl.querySelector(`.ncard[data-id="${t.ref.card}"] [data-key="${CSS.escape(t.ref.key)}"]`)?.classList.add('picked');
+    }
+  }
+  function drawEqBar() {
+    if (!picking) return;
+    const T = picking.terms;
+    const r = T.length ? evalEq({ terms: T }) : null;
+    const expr = T.map((t, i) => { const q = termInfo(t).q; return (i ? ` ${OPS[t.op]} ` : '') + (q ? fmtQty(q.value, q.unit) : '?'); }).join('')
+      + (r && r.ok && T.length > 1 ? `  =  ${fmtQty(r.value, r.unit)}` : '');
+    eqBar.replaceChildren(
+      h('div.eqb-head', h('b', picking.editId ? 'Edit equation' : 'New equation'),
+        h('span.eqb-hint', T.length ? `${T.length} number${T.length === 1 ? '' : 's'}` : 'tap numbers on the page')),
+      h('div.eqb-expr', expr || 'Tap an answer on the page to start…'),
+      h('div.eqb-row',
+        h('div.seg.eqb-ops', { role: 'radiogroup', 'aria-label': 'Next operation' },
+          Object.keys(OPS).map(o => h('button' + (picking.op === o ? '.on' : ''), {
+            type: 'button', role: 'radio', 'aria-checked': String(picking.op === o), 'aria-label': { '+': 'plus', '-': 'minus', '*': 'times', '/': 'divided by' }[o],
+            on: { click: () => { picking.op = o; drawEqBar(); } },
+          }, OPS[o]))),
+        h('button.btn.small', { type: 'button', title: 'Type a number', on: { click: addTypedNumber } }, '123'),
+        h('button.btn.small', { type: 'button', 'aria-label': 'Remove last number', disabled: !T.length, on: { click: () => { T.pop(); drawEqBar(); } } }, icon('undo'))),
+      h('div.eqb-row',
+        h('button.btn.small', { type: 'button', style: { flex: 1 }, on: { click: endEq } }, 'Cancel'),
+        h('button.btn.small.primary', { type: 'button', style: { flex: 1 }, disabled: !T.length, on: { click: finishEq } }, 'Done')));
+    markPicked();
+  }
+  function addRef(el) {
+    const cardId = el.closest('.ncard')?.dataset.id;
+    if (!cardId || cardId === picking.editId) return;   // an equation can't use itself
+    picking.terms.push({ op: picking.terms.length ? picking.op : '+', ref: { card: cardId, key: el.dataset.key } });
+    drawEqBar();
+  }
+  async function addTypedNumber() {
+    const text = await promptSheet('Add a number', '', 'Add', { placeholder: 'e.g. 5000 bu sold' });
+    if (!text || !picking) return;
+    const m = /^\s*(-?[\d,]*\.?\d+)\s*(.*)$/.exec(text.replace(/−/g, '-'));
+    if (!m) { toast('Start with a number, e.g. 5000 sold'); return; }
+    let rest = m[2].trim(), unit = '';
+    // "5000 bu sold": if the first word matches the running unit, treat it as the unit
+    const running = picking.terms.length ? evalEq({ terms: picking.terms }).unit : '';
+    if (running && rest.split(/\s+/)[0] === running) { unit = running; rest = rest.slice(running.length).trim(); }
+    picking.terms.push({ op: picking.terms.length ? picking.op : '+', num: parseFloat(m[1].replace(/,/g, '')), unit, label: rest || 'number' });
+    drawEqBar();
+  }
+  async function finishEq() {
+    const P = picking;
+    if (!P || !P.terms.length) return;
+    if (P.editId) {
+      const eq = page.cards.find(k => k.id === P.editId);
+      if (eq) { undo.push({ t: 'eqedit', card: eq, from: eq.terms, to: P.terms }); redo = []; eq.terms = P.terms; }
+      endEq(); saveNotebook(); renderCards(); syncTools();
+      return;
+    }
+    const allPlus = P.terms.every((t, i) => !i || t.op === '+');
+    endEq();
+    const title = (await promptSheet('Name this equation', allPlus ? 'Total' : 'Result', 'Save')) || (allPlus ? 'Total' : 'Result');
+    // place it beside the first entry it uses (or below the entries if there's no room)
+    const src = P.terms.map(t => t.ref && page.cards.find(k => k.id === t.ref.card)).filter(Boolean);
+    let x = MARGIN_X + 14, y = HEAD_H + 8;
+    if (src.length) {
+      const first = src[0];
+      const w = cardsEl.querySelector(`.ncard[data-id="${first.id}"]`)?.offsetWidth || 340;
+      x = first.x + w + 40; y = first.y;
+      if (x > PAGE_W - 360) {
+        x = first.x;
+        y = Math.max(...src.map(c => c.y + (cardsEl.querySelector(`.ncard[data-id="${c.id}"]`)?.offsetHeight || 200))) + 36;
+      }
+    }
+    const eq = { id: uid(), kind: 'eq', title, terms: P.terms, date: Date.now(), x: Math.round(clamp(x, 4, PAGE_W - 340)), y: snapToRule(y) };
+    page.cards.push(eq);
+    undo.push({ t: 'addcard', card: eq }); redo = [];
+    saveNotebook(); renderCards(); syncTools();
+    requestAnimationFrame(() => centerOn(eq));
+  }
+
+  // ---- arrows from each number an equation uses to its line in the equation ----
+  function worldRect(el) {
+    const r = el.getBoundingClientRect(), v = viewport.getBoundingClientRect();
+    return { x: (r.left - v.left - vt.x) / vt.scale, y: (r.top - v.top - vt.y) / vt.scale, w: r.width / vt.scale, h: r.height / vt.scale };
+  }
+  function drawArrows(g) {
+    for (const c of page.cards) {
+      if (c.kind !== 'eq') continue;
+      c.terms.forEach((t, i) => {
+        if (!t.ref) return;
+        const cardNode = cardsEl.querySelector(`.ncard[data-id="${t.ref.card}"]`);
+        const rowEl = cardsEl.querySelector(`.ncard[data-id="${c.id}"] [data-term="${i}"]`);
+        if (!cardNode || !rowEl) return;
+        const keyEl = cardNode.querySelector(`[data-key="${CSS.escape(t.ref.key)}"]`);
+        const a = worldRect(keyEl && keyEl.offsetParent ? keyEl : cardNode);   // folded-away number → point at its entry
+        const b = worldRect(rowEl);
+        g.save();
+        g.strokeStyle = g.fillStyle = '#ff7a00';
+        g.globalAlpha = 0.9; g.lineWidth = 2; g.setLineDash([7, 5]); g.lineCap = 'round';
+        let sx, sy = a.y + a.h / 2, ex, ey = b.y + b.h / 2, c1x, c2x;
+        const overlap = !(a.x + a.w < b.x || b.x + b.w < a.x);
+        if (overlap) {                       // stacked in the same column: loop out to the left
+          sx = a.x - 6; ex = b.x - 4;
+          c1x = Math.min(sx, ex) - 60; c2x = c1x;
+        } else if (b.x > a.x) {              // equation to the right
+          sx = a.x + a.w + 6; ex = b.x - 4;
+          const d = Math.max(30, (ex - sx) / 2); c1x = sx + d; c2x = ex - d;
+        } else {                             // equation to the left
+          sx = a.x - 6; ex = b.x + b.w + 4;
+          const d = Math.max(30, (sx - ex) / 2); c1x = sx - d; c2x = ex + d;
+        }
+        g.beginPath(); g.moveTo(sx, sy); g.bezierCurveTo(c1x, sy, c2x, ey, ex, ey); g.stroke();
+        // arrowhead along the curve's final direction
+        g.setLineDash([]);
+        const ang = Math.atan2(ey - ey, ex - c2x) || (ex >= c2x ? 0 : Math.PI);
+        const L = 11;
+        g.beginPath(); g.moveTo(ex, ey);
+        g.lineTo(ex - L * Math.cos(ang - 0.45), ey - L * Math.sin(ang - 0.45));
+        g.lineTo(ex - L * Math.cos(ang + 0.45), ey - L * Math.sin(ang + 0.45));
+        g.closePath(); g.fill();
+        g.restore();
+      });
+    }
+  }
+
   /** Size (Small/Medium/Large) and color for one text note; changes apply right away and can be undone. */
   function textStyleControls(c) {
     const wrap = h('div.text-style');
@@ -278,6 +531,18 @@ export async function renderNotebook(view, query) {
   }
 
   function cardMenu(c) {
+    if (c.kind === 'eq') {
+      openSheet(close => [
+        h('h3', c.title),
+        h('button.list-item', { on: { click: () => { close(); startEq(c); } } }, icon('edit'), h('div.li-main', h('div.li-title', 'Edit equation'), h('div.li-sub', 'Add or remove numbers, change + − × ÷'))),
+        h('button.list-item', {
+          on: { click: async () => { close(); const t = await promptSheet('Rename equation', c.title, 'Save'); if (t) { c.title = t; saveNotebook(); renderCards(); } } },
+        }, icon('note'), h('div.li-main', h('div.li-title', 'Rename'))),
+        h('button.list-item', { on: { click: () => { close(); duplicateCard(c); } } }, icon('dup'), h('div.li-main', h('div.li-title', 'Duplicate'))),
+        h('button.list-item', { on: { click: () => { close(); removeCard(c, 'Equation deleted'); } } }, icon('trash'), h('div.li-main', h('div.li-title', { style: { color: 'var(--danger)' } }, 'Delete equation'))),
+      ]);
+      return;
+    }
     if (c.kind === 'text') {
       openSheet(close => [
         h('h3', 'Text'),
@@ -290,8 +555,11 @@ export async function renderNotebook(view, query) {
     }
     openSheet(close => [
       h('h3', c.title),
+      // Edit inputs: opens the calculator with this entry's values; "Update" there rewrites this entry in place
+      h('button.list-item', { on: { click: () => { close(); location.hash = `#/calc/${c.calcId}?p=${encodeURIComponent(JSON.stringify(c.prefill || {}))}&edit=${page.id}~${c.id}`; } } },
+        icon('edit'), h('div.li-main', h('div.li-title', 'Edit inputs'), h('div.li-sub', 'Change a value (e.g. a measured diameter) and update this entry'))),
       h('button.list-item', { on: { click: () => { close(); location.hash = `#/calc/${c.calcId}?p=${encodeURIComponent(JSON.stringify(c.prefill || {}))}`; } } },
-        icon('calc'), h('div.li-main', h('div.li-title', 'Reopen in calculator'), h('div.li-sub', 'Loads these exact inputs'))),
+        icon('calc'), h('div.li-main', h('div.li-title', 'Open as a new calculation'), h('div.li-sub', 'Starts from these inputs; this entry stays as is'))),
       h('button.list-item', {
         on: {
           click: async () => {
@@ -334,6 +602,11 @@ export async function renderNotebook(view, query) {
   let start = null;
 
   function onDown(e) {
+    // building an equation: a tap on any answer adds it
+    if (picking) {
+      const k = e.target.closest('[data-key]');
+      if (k && k.closest('.ncard')) { e.preventDefault(); addRef(k); return; }
+    }
     if (e.target.closest('button, a, input, select')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -585,6 +858,8 @@ export async function renderNotebook(view, query) {
       else { page.cards.splice(page.cards.indexOf(a.card), 1); page.strokes = page.strokes.filter(s => s.card !== a.card.id); }
     } else if (a.t === 'addcard') {
       if (reverse) page.cards.splice(page.cards.indexOf(a.card), 1); else page.cards.push(a.card);
+    } else if (a.t === 'eqedit') {
+      a.card.terms = reverse ? a.from : a.to;
     } else if (a.t === 'edit') {
       a.card.text = reverse ? a.from : a.to;
     } else if (a.t === 'style') {
@@ -738,6 +1013,7 @@ export async function renderNotebook(view, query) {
       drawCardToCanvas(g, el, c, vt.scale);
     }
     for (const s of page.strokes) drawStroke(g, s);
+    drawArrows(g);
     const blob = await new Promise(res => out.toBlob(res, 'image/png'));
     const name = `${page.name.replace(/[^\w-]+/g, '_')}.png`;
     const file = new File([blob], name, { type: 'image/png' });

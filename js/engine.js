@@ -110,7 +110,9 @@ export function initState(def, settings, saved, prefill) {
     for (const f of def.fields) {
       if (fieldType(f) !== 'number' || prefill[f.name] === undefined || prefill[f.name] === null) continue;
       const base = prefill[f.name];
-      if (prefill[f.name + 'Unit'] && f.choices) state.units[f.name] = prefill[f.name + 'Unit'];
+      // restore the unit it was entered in (e.g. rings) when it's still a valid choice
+      const pu = prefill[f.name + 'Unit'];
+      if (pu && ((f.choices && f.choices.some(c => c.value === pu)) || (f.dim && DIMS[f.dim].units[pu]))) state.units[f.name] = pu;
       state.values[f.name] = typeof base === 'number' ? fmtInput(f.dim ? fromBase(f.dim, base, state.units[f.name], ctx) : base) : String(base);
     }
   }
@@ -242,7 +244,7 @@ export function snapshot(def, state, settings, result, resUnits = {}, pick = nul
     if (fieldType(f) !== 'number') prefill[f.name] = state.values[f.name];
     else if (v[f.name] !== null && v[f.name] !== undefined) {
       prefill[f.name] = v[f.name];
-      if (f.choices) prefill[f.name + 'Unit'] = state.units[f.name];
+      if (f.choices || f.dim) prefill[f.name + 'Unit'] = state.units[f.name];
     }
   }
   // Summary cards show the main answer plus a couple of key supporting results:
@@ -254,6 +256,8 @@ export function snapshot(def, state, settings, result, resUnits = {}, pick = nul
   return {
     calcId: def.id, title: def.title, category: def.category, date: Date.now(),
     style: summary ? 'summary' : 'steps',
+    // how this entry was made, so "Edit inputs" can rebuild it the same way
+    pick: summary ? 'summary' : (all ? null : pick),
     subtitle: all ? '' : steps.map(s => s.label).join(' · '),
     given, steps: [...steps.slice(0, -1).map(s => ({ ...s, final: false })), lastStep], results, notes: all ? out.notes || [] : [], prefill,
   };
